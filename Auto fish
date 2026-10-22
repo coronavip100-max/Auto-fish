@@ -1,0 +1,390 @@
+-- ==========================================
+-- Ultimate Auto-Fish v34 (Dual-Thread + Status)
+-- ==========================================
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(1)
+
+local RS = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local localPlayer = Players.LocalPlayer
+local PlayerGui = localPlayer:WaitForChild("PlayerGui")
+
+local Net = RS.Services.CommunityModules.RbxNet._NetManaged
+local Remotes = {
+    Status          = Net:FindFirstChild("Fishing/Status"),
+    MinigameCommand = Net:FindFirstChild("Fishing/MinigameCommand"),
+    MinigameAction  = Net:FindFirstChild("Fishing/MinigameAction"),
+}
+
+local isRunning = false
+local antiAfkEnabled = true 
+local lagReduced = false
+local LastStatus = "idle"
+local CurrentGUID = nil
+local isMinimized = false
+
+-- ==========================================
+-- 1. تصميم الواجهة
+-- ==========================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PremiumFishUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.DisplayOrder = 999
+ScreenGui.Parent = PlayerGui
+
+-- الزر العائم
+local FloatBtn = Instance.new("TextButton")
+FloatBtn.Size = UDim2.new(0, 40, 0, 40)
+FloatBtn.Position = UDim2.new(0, 15, 0.4, 0)
+FloatBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+FloatBtn.Text = "🎣"
+FloatBtn.TextSize = 18
+FloatBtn.TextColor3 = Color3.fromRGB(0, 150, 255)
+FloatBtn.Active = true
+FloatBtn.Parent = ScreenGui
+Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(1, 0)
+local FloatStroke = Instance.new("UIStroke", FloatBtn)
+FloatStroke.Color = Color3.fromRGB(0, 150, 255)
+FloatStroke.Thickness = 2
+
+-- النافذة الرئيسية
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 250, 0, 360)
+Main.Position = UDim2.new(0.5, -125, 0.5, -180)
+Main.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+Main.BorderSizePixel = 0
+Main.Visible = true 
+Main.ClipsDescendants = true 
+Main.Parent = ScreenGui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
+
+-- الإطار الأزرق المتحرك
+local MainStroke = Instance.new("UIStroke", Main)
+MainStroke.Color = Color3.fromRGB(0, 100, 255)
+MainStroke.Thickness = 2
+MainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+task.spawn(function()
+    local tweenInfo = TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+    local tween = TweenService:Create(MainStroke, tweenInfo, {Color = Color3.fromRGB(0, 255, 255)})
+    tween:Play()
+end)
+
+-- العنوان
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -40, 0, 35)
+Title.Position = UDim2.new(0, 5, 0, 2)
+Title.BackgroundTransparency = 1
+Title.Text = "🎣 Auto-Fish"
+Title.TextColor3 = Color3.fromRGB(0, 150, 255)
+Title.TextSize = 16
+Title.Font = Enum.Font.GothamBold
+Title.Parent = Main
+
+-- زر التصغير
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+MinimizeBtn.Position = UDim2.new(1, -35, 0, 3)
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+MinimizeBtn.Text = "➖"
+MinimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeBtn.TextSize = 14
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.Parent = Main
+Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 6)
+
+-- زر التشغيل/الإطفاء
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0.85, 0, 0, 35)
+ToggleBtn.Position = UDim2.new(0.075, 0, 0, 42)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+ToggleBtn.Text = "▶️ تشغيل السكربت"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.TextSize = 14
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.Parent = Main
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 8)
+
+-- ⭐ شريط الحالة الجديد
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0.85, 0, 0, 25)
+StatusLabel.Position = UDim2.new(0.075, 0, 0, 85)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "الحالة: جاهز"
+StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+StatusLabel.TextSize = 12
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Parent = Main
+
+-- نصوص التعليمات
+local InfoText = Instance.new("TextLabel")
+InfoText.Size = UDim2.new(0.9, 0, 0, 70)
+InfoText.Position = UDim2.new(0.05, 0, 0, 115)
+InfoText.BackgroundTransparency = 1
+InfoText.Text = "📌 التعليمات:\n1. يمسك الصنارة ويرمي.\n2. ينتظر الصيد (60-120 ث).\n3. ينتظر 4 ثواني عند اللعبة.\n4. يصطاد ويعيد الكرة."
+InfoText.TextColor3 = Color3.fromRGB(150, 150, 150)
+InfoText.TextSize = 11
+InfoText.Font = Enum.Font.Gotham
+InfoText.TextXAlignment = Enum.TextXAlignment.Left
+InfoText.TextYAlignment = Enum.TextYAlignment.Top
+InfoText.TextWrapped = true
+InfoText.Parent = Main
+
+-- زر مضاد AFK
+local AfkBtn = Instance.new("TextButton")
+AfkBtn.Size = UDim2.new(0.85, 0, 0, 32)
+AfkBtn.Position = UDim2.new(0.075, 0, 0, 195)
+AfkBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+AfkBtn.Text = "🛡️ مضاد AFK: مفعل"
+AfkBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AfkBtn.TextSize = 12
+AfkBtn.Font = Enum.Font.GothamBold
+AfkBtn.Parent = Main
+Instance.new("UICorner", AfkBtn).CornerRadius = UDim.new(0, 6)
+
+-- زر تخفيف اللاك
+local LagBtn = Instance.new("TextButton")
+LagBtn.Size = UDim2.new(0.85, 0, 0, 32)
+LagBtn.Position = UDim2.new(0.075, 0, 0, 235)
+LagBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
+LagBtn.Text = "⚡ تخفيف اللاك: معطل"
+LagBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+LagBtn.TextSize = 12
+LagBtn.Font = Enum.Font.GothamBold
+LagBtn.Parent = Main
+Instance.new("UICorner", LagBtn).CornerRadius = UDim.new(0, 6)
+
+-- نص الحقوق
+local Footer = Instance.new("TextLabel")
+Footer.Size = UDim2.new(1, 0, 0, 20)
+Footer.Position = UDim2.new(0, 0, 1, -25)
+Footer.BackgroundTransparency = 1
+Footer.Text = "Delta Executor | v34"
+Footer.TextColor3 = Color3.fromRGB(100, 100, 100)
+Footer.TextSize = 9
+Footer.Font = Enum.Font.Gotham
+Footer.Parent = Main
+
+-- دالة السحب
+local function MakeDraggable(frame, dragHandle)
+    dragHandle = dragHandle or frame
+    local dragging, dragInput, dragStart, startPos
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    dragHandle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+
+MakeDraggable(FloatBtn)
+MakeDraggable(Main, Title)
+
+FloatBtn.MouseButton1Click:Connect(function() Main.Visible = not Main.Visible end)
+
+-- وظيفة زر التصغير
+MinimizeBtn.MouseButton1Click:Connect(function()
+    if not isMinimized then
+        local tween = TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, 250, 0, 35)})
+        tween:Play()
+        MinimizeBtn.Text = "➕"
+        isMinimized = true
+    else
+        local tween = TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, 250, 0, 360)})
+        tween:Play()
+        MinimizeBtn.Text = "➖"
+        isMinimized = false
+    end
+end)
+
+-- ==========================================
+-- 2. ميزات الحماية
+-- ==========================================
+localPlayer.Idled:Connect(function()
+    if antiAfkEnabled then
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new(0, 0))
+        end)
+    end
+end)
+
+AfkBtn.MouseButton1Click:Connect(function()
+    antiAfkEnabled = not antiAfkEnabled
+    AfkBtn.Text = antiAfkEnabled and "🛡️ مضاد AFK: مفعل" or "🛡️ مضاد AFK: معطل"
+    AfkBtn.BackgroundColor3 = antiAfkEnabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(100, 50, 50)
+end)
+
+LagBtn.MouseButton1Click:Connect(function()
+    lagReduced = not lagReduced
+    if lagReduced then
+        LagBtn.Text = "⚡ تخفيف اللاك: مفعل"
+        LagBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if not obj:IsDescendantOf(localPlayer.Character) and not obj:IsDescendantOf(game:GetService("Players")) then
+                if obj:IsA("ParticleEmitter") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") or obj:IsA("Decal") or obj:IsA("Texture") then
+                    obj:Destroy()
+                end
+            end
+        end
+    else
+        LagBtn.Text = "⚡ تخفيف اللاك: معطل"
+        LagBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+    end
+end)
+
+-- ==========================================
+-- 3. خيط مراقبة اللعبة (مستقل تماماً)
+-- ==========================================
+if Remotes.MinigameCommand then
+    Remotes.MinigameCommand.OnClientEvent:Connect(function(cmd, guid)
+        if cmd == "Start" and guid and isRunning then
+            local currentGUID = tostring(guid)
+            task.spawn(function()
+                StatusLabel.Text = "الحالة: لعبة ظهرت! انتظار 4ث..."
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+                task.wait(4)
+                
+                if isRunning then
+                    StatusLabel.Text = "الحالة: جاري إرسال Complete..."
+                    StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                    pcall(function()
+                        Remotes.MinigameAction:FireServer("Complete", currentGUID)
+                    end)
+                end
+            end)
+        end
+    end)
+end
+
+if Remotes.Status then
+    Remotes.Status.OnClientEvent:Connect(function(status)
+        if type(status) == "string" then LastStatus = status end
+    end)
+end
+
+-- ==========================================
+-- 4. خيط الرمي والانتظار
+-- ==========================================
+local function EquipRod()
+    local char = localPlayer.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and (string.find(string.lower(equipped.Name), "rod") or string.find(string.lower(equipped.Name), "fishing")) then
+        return true 
+    end
+
+    local backpack = localPlayer:FindFirstChild("Backpack")
+    if backpack then
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") and (string.find(string.lower(tool.Name), "rod") or string.find(string.lower(tool.Name), "fishing")) then
+                hum:EquipTool(tool)
+                task.wait(0.5) 
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function AutoFishLoop()
+    task.spawn(function()
+        while isRunning do
+            StatusLabel.Text = "الحالة: جاري مسك الصنارة..."
+            StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+            
+            if not EquipRod() then
+                task.wait(2)
+                continue
+            end
+
+            local char = localPlayer.Character
+            local tool = char and char:FindFirstChildOfClass("Tool")
+            if tool then
+                pcall(function() tool:Deactivate() end)
+            end
+            task.wait(0.5)
+
+            if tool then
+                StatusLabel.Text = "الحالة: جاري الرمي..."
+                pcall(function() tool:Activate() end)
+                task.wait(1.2) 
+                pcall(function() tool:Deactivate() end)
+            end
+
+            local timer = 0
+            local castSuccess = false
+            while isRunning and timer < 3 do
+                if LastStatus == "Searching" or LastStatus == "LongWaitStart" then
+                    castSuccess = true
+                    break
+                elseif LastStatus == "CastFailed" then
+                    break
+                end
+                
+                if not char:FindFirstChildOfClass("Tool") then break end
+                task.wait(0.2)
+                timer = timer + 0.2
+            end
+            
+            if not castSuccess then
+                StatusLabel.Text = "الحالة: فشل الرمي، إعادة..."
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                task.wait(1)
+                continue
+            end
+
+            StatusLabel.Text = "الحالة: في انتظار السمكة..."
+            StatusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+            
+            timer = 0
+            -- ننتظر لحد ما تصير الحالة Caught (الخيط الثاني هو اللي يرسل Complete)
+            while isRunning and LastStatus ~= "Caught" and timer < 120 do
+                if not char:FindFirstChildOfClass("Tool") then break end
+                task.wait(0.5)
+                timer = timer + 0.5
+            end
+
+            if LastStatus == "Caught" then
+                StatusLabel.Text = "الحالة: ✅ تم الصيد بنجاح!"
+                StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+            end
+
+            task.wait(3)
+        end
+    end)
+end
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    isRunning = not isRunning
+    if isRunning then
+        ToggleBtn.Text = "⏹️ إطفاء السكربت"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        AutoFishLoop()
+    else
+        ToggleBtn.Text = "▶️ تشغيل السكربت"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+        StatusLabel.Text = "الحالة: متوقف"
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
