@@ -1,34 +1,131 @@
 -- ==========================================
--- Ultimate Auto-Fish v34 (Dual-Thread + Status)
+-- Ultimate Auto-Fish v41 (Premium UI)
 -- ==========================================
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(1)
 
+-- ==========================================
+-- ⚙️ الإعدادات
+-- ==========================================
+local CONFIG = {
+    FISH_TIMEOUT          = 150,
+    CAST_TIMEOUT          = 6,
+    RETRY_DELAY           = 2,
+    CAST_FAIL_RETRY_DELAY = 3,
+    CONSECUTIVE_FAILS     = 3,
+    LONG_RETRY_DELAY      = 5,
+    POST_CATCH_DELAY      = 3,
+    TOOL_LOST_GRACE       = 2,
+    MINIGAME_WAIT_GRACE   = 6,
+    CAST_DEACTIVATE_WAIT  = 1.2,
+    TOOL_RESET_WAIT       = 0.6,
+}
+
+-- ==========================================
+-- 🎨 الهوية البصرية
+-- ==========================================
+local THEME = {
+    BgDeep     = Color3.fromRGB(8, 8, 14),
+    BgMid      = Color3.fromRGB(14, 14, 22),
+    BgSoft     = Color3.fromRGB(24, 24, 36),
+    BgHover    = Color3.fromRGB(34, 34, 48),
+    Accent     = Color3.fromRGB(0, 140, 255),
+    AccentLite = Color3.fromRGB(0, 220, 255),
+    Success    = Color3.fromRGB(0, 210, 120),
+    SuccessLt  = Color3.fromRGB(0, 240, 140),
+    Danger     = Color3.fromRGB(230, 60, 80),
+    DangerLt   = Color3.fromRGB(255, 90, 110),
+    Warn       = Color3.fromRGB(255, 190, 60),
+    TextMain   = Color3.fromRGB(230, 235, 245),
+    TextDim    = Color3.fromRGB(140, 150, 170),
+}
+
+-- ==========================================
+-- الخدمات
+-- ==========================================
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
+local RunService = game:GetService("RunService")
 local localPlayer = Players.LocalPlayer
 local PlayerGui = localPlayer:WaitForChild("PlayerGui")
 
+-- [داخلي — لا يُعرض للمستخدم]
 local Net = RS.Services.CommunityModules.RbxNet._NetManaged
 local Remotes = {
     Status          = Net:FindFirstChild("Fishing/Status"),
     MinigameCommand = Net:FindFirstChild("Fishing/MinigameCommand"),
     MinigameAction  = Net:FindFirstChild("Fishing/MinigameAction"),
 }
-
-local isRunning = false
-local antiAfkEnabled = true 
-local lagReduced = false
-local LastStatus = "idle"
-local CurrentGUID = nil
-local isMinimized = false
+if not Remotes.Status or not Remotes.MinigameCommand or not Remotes.MinigameAction then
+    warn("[AutoFish] بعض Remotes مفقودة")
+end
 
 -- ==========================================
--- 1. تصميم الواجهة
+-- الحالة
+-- ==========================================
+local isRunning        = false
+local isMinimized      = false
+local LastStatus       = "idle"
+local LastStatusTime   = 0
+local statusVersion    = 0
+local autoFishLoopId   = 0
+local currentAttemptId = 0
+local CurrentGUID      = nil
+local attemptStartTick = 0
+
+-- أبعاد
+local MAIN_WIDTH       = 260
+local MAIN_FULL_HEIGHT = 215
+local MAIN_MIN_HEIGHT  = 38
+
+-- ==========================================
+-- سجل تشخيصي (كونسول)
+-- ==========================================
+local function Diag(msg)
+    if attemptStartTick > 0 and currentAttemptId > 0 then
+        print(string.format("[AutoFish #%d +%.2fs] %s", currentAttemptId, tick() - attemptStartTick, msg))
+    else
+        print(string.format("[AutoFish] %s", msg))
+    end
+end
+
+-- ==========================================
+-- ترجمة الأسباب إلى رسائل عربية
+-- ==========================================
+local function GetUserFailureMessage(status, reason)
+    local r = (type(reason) == "string") and reason or ""
+    local s = (type(status) == "string") and status or ""
+
+    if r == "equip_failed" then return "تعذّر تجهيز الصنارة" end
+    if r == "cast_timeout" then return "انتهت مهلة الرمي — إعادة المحاولة" end
+    if r == "tool_lost_during_cast" then return "فُقدت الصنارة — إعادة المحاولة" end
+    if r == "character_lost" then return "تعذّر الوصول للشخصية — إعادة المحاولة" end
+    if r == "fish_timeout" then return "انتهت المهلة — إعادة المحاولة" end
+    if r == "tool_deleted" then return "فُقدت الصنارة — إعادة المحاولة" end
+    if r ~= "" and string.find(r, "fish_status_fail", 1, true) then
+        return "فشل الصيد — إعادة المحاولة"
+    end
+    if r == "cast_status_fail" or s == "CastFailed" then
+        return "فشل الرمي — إعادة المحاولة"
+    end
+
+    local hay = r .. " " .. s
+    if string.find(hay, "CastFailed", 1, true) then return "فشل الرمي — إعادة المحاولة" end
+    if string.find(hay, "timeout", 1, true) or string.find(hay, "Timeout", 1, true) then
+        return "انتهت المهلة — إعادة المحاولة"
+    end
+    if string.find(hay, "lost", 1, true) or string.find(hay, "Lost", 1, true) then
+        return "فُقدت الصنارة — إعادة المحاولة"
+    end
+    return "حدث خطأ — إعادة المحاولة"
+end
+
+-- ==========================================
+-- 🖼️ ScreenGui
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PremiumFishUI"
@@ -36,153 +133,417 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999
 ScreenGui.Parent = PlayerGui
 
--- الزر العائم
+-- ==========================================
+-- 🎯 الزر العائم
+-- ==========================================
 local FloatBtn = Instance.new("TextButton")
-FloatBtn.Size = UDim2.new(0, 40, 0, 40)
+FloatBtn.Size = UDim2.new(0, 46, 0, 46)
 FloatBtn.Position = UDim2.new(0, 15, 0.4, 0)
-FloatBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+FloatBtn.BackgroundColor3 = THEME.BgDeep
 FloatBtn.Text = "🎣"
-FloatBtn.TextSize = 18
-FloatBtn.TextColor3 = Color3.fromRGB(0, 150, 255)
+FloatBtn.TextSize = 22
+FloatBtn.Font = Enum.Font.GothamBold
+FloatBtn.TextColor3 = THEME.AccentLite
+FloatBtn.AutoButtonColor = false
 FloatBtn.Active = true
 FloatBtn.Parent = ScreenGui
 Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(1, 0)
+
+local FloatGrad = Instance.new("UIGradient")
+FloatGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 16)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(28, 28, 44)),
+}
+FloatGrad.Rotation = 135
+FloatGrad.Parent = FloatBtn
+
 local FloatStroke = Instance.new("UIStroke", FloatBtn)
-FloatStroke.Color = Color3.fromRGB(0, 150, 255)
+FloatStroke.Color = THEME.Accent
 FloatStroke.Thickness = 2
+FloatStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+TweenService:Create(FloatStroke, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.AccentLite}):Play()
 
--- النافذة الرئيسية
+-- نبض الحجم البسيط
+TweenService:Create(FloatBtn, TweenInfo.new(1.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+    Size = UDim2.new(0, 50, 0, 50)
+}):Play()
+
+-- ==========================================
+-- 🪟 النافذة الرئيسية
+-- ==========================================
 local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 250, 0, 360)
-Main.Position = UDim2.new(0.5, -125, 0.5, -180)
-Main.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+Main.Name = "Main"
+Main.Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_FULL_HEIGHT)
+Main.Position = UDim2.new(0.5, -MAIN_WIDTH/2, 0.5, -MAIN_FULL_HEIGHT/2)
+Main.BackgroundColor3 = THEME.BgMid
 Main.BorderSizePixel = 0
-Main.Visible = true 
-Main.ClipsDescendants = true 
+Main.ClipsDescendants = true
+Main.Active = true
+Main.Visible = true
 Main.Parent = ScreenGui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
 
--- الإطار الأزرق المتحرك
+local MainGrad = Instance.new("UIGradient")
+MainGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 16)),
+    ColorSequenceKeypoint.new(0.6, Color3.fromRGB(16, 16, 26)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 36)),
+}
+MainGrad.Rotation = 115
+MainGrad.Parent = Main
+
 local MainStroke = Instance.new("UIStroke", Main)
-MainStroke.Color = Color3.fromRGB(0, 100, 255)
-MainStroke.Thickness = 2
+MainStroke.Color = THEME.Accent
+MainStroke.Thickness = 1.8
 MainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-task.spawn(function()
-    local tweenInfo = TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
-    local tween = TweenService:Create(MainStroke, tweenInfo, {Color = Color3.fromRGB(0, 255, 255)})
-    tween:Play()
-end)
+TweenService:Create(MainStroke, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.AccentLite}):Play()
 
--- العنوان
+-- UIScale تلقائي
+local MainScale = Instance.new("UIScale")
+MainScale.Scale = 1
+MainScale.Parent = Main
+
+-- خط علوي مضيء (shine)
+local TopShine = Instance.new("Frame")
+TopShine.Size = UDim2.new(1, -16, 0, 1)
+TopShine.Position = UDim2.new(0, 8, 0, 0)
+TopShine.BackgroundColor3 = Color3.fromRGB(120, 200, 255)
+TopShine.BorderSizePixel = 0
+TopShine.ZIndex = 2
+TopShine.Parent = Main
+Instance.new("UICorner", TopShine).CornerRadius = UDim.new(1, 0)
+local ShineGrad = Instance.new("UIGradient")
+ShineGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.new(0,0,0)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(140, 220, 255)),
+    ColorSequenceKeypoint.new(1, Color3.new(0,0,0)),
+}
+ShineGrad.Transparency = NumberSequence.new{
+    NumberSequenceKeypoint.new(0, 1),
+    NumberSequenceKeypoint.new(0.5, 0.3),
+    NumberSequenceKeypoint.new(1, 1),
+}
+ShineGrad.Parent = TopShine
+
+-- ─── شريط العنوان ───
+local TitleRow = Instance.new("Frame")
+TitleRow.Size = UDim2.new(1, 0, 0, 38)
+TitleRow.BackgroundTransparency = 1
+TitleRow.Parent = Main
+
+local IconFrame = Instance.new("Frame")
+IconFrame.Size = UDim2.new(0, 26, 0, 26)
+IconFrame.Position = UDim2.new(0, 10, 0.5, -13)
+IconFrame.BackgroundColor3 = THEME.Accent
+IconFrame.BorderSizePixel = 0
+IconFrame.Parent = TitleRow
+Instance.new("UICorner", IconFrame).CornerRadius = UDim.new(1, 0)
+local IconGrad = Instance.new("UIGradient")
+IconGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, THEME.Accent),
+    ColorSequenceKeypoint.new(1, THEME.AccentLite),
+}
+IconGrad.Rotation = 135
+IconGrad.Parent = IconFrame
+local IconText = Instance.new("TextLabel")
+IconText.Size = UDim2.new(1, 0, 1, 0)
+IconText.BackgroundTransparency = 1
+IconText.Text = "🎣"
+IconText.TextSize = 14
+IconText.Parent = IconFrame
+
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -40, 0, 35)
-Title.Position = UDim2.new(0, 5, 0, 2)
+Title.Size = UDim2.new(1, -110, 0, 26)
+Title.Position = UDim2.new(0, 44, 0.5, -13)
 Title.BackgroundTransparency = 1
-Title.Text = "🎣 Auto-Fish"
-Title.TextColor3 = Color3.fromRGB(0, 150, 255)
+Title.Text = "Auto-Fish"
+Title.TextColor3 = THEME.TextMain
 Title.TextSize = 16
 Title.Font = Enum.Font.GothamBold
-Title.Parent = Main
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleRow
 
--- زر التصغير
 local MinimizeBtn = Instance.new("TextButton")
-MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
-MinimizeBtn.Position = UDim2.new(1, -35, 0, 3)
-MinimizeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+MinimizeBtn.Size = UDim2.new(0, 26, 0, 26)
+MinimizeBtn.Position = UDim2.new(1, -36, 0.5, -13)
+MinimizeBtn.BackgroundColor3 = THEME.BgSoft
 MinimizeBtn.Text = "➖"
-MinimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-MinimizeBtn.TextSize = 14
+MinimizeBtn.TextColor3 = THEME.TextDim
+MinimizeBtn.TextSize = 13
 MinimizeBtn.Font = Enum.Font.GothamBold
-MinimizeBtn.Parent = Main
-Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 6)
+MinimizeBtn.AutoButtonColor = false
+MinimizeBtn.Parent = TitleRow
+Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 8)
+local MinStroke = Instance.new("UIStroke", MinimizeBtn)
+MinStroke.Color = Color3.fromRGB(50, 50, 70)
+MinStroke.Thickness = 1
+MinStroke.Transparency = 0.4
 
--- زر التشغيل/الإطفاء
+MinimizeBtn.MouseEnter:Connect(function()
+    TweenService:Create(MinimizeBtn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.BgHover}):Play()
+end)
+MinimizeBtn.MouseLeave:Connect(function()
+    TweenService:Create(MinimizeBtn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.BgSoft}):Play()
+end)
+
+-- ─── فاصل ───
+local Divider = Instance.new("Frame")
+Divider.Size = UDim2.new(1, -20, 0, 1)
+Divider.Position = UDim2.new(0, 10, 0, 40)
+Divider.BackgroundColor3 = Color3.fromRGB(40, 50, 70)
+Divider.BorderSizePixel = 0
+Divider.Parent = Main
+local DivGrad = Instance.new("UIGradient")
+DivGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, THEME.Accent),
+    ColorSequenceKeypoint.new(0.5, THEME.AccentLite),
+    ColorSequenceKeypoint.new(1, THEME.Accent),
+}
+DivGrad.Transparency = NumberSequence.new{
+    NumberSequenceKeypoint.new(0, 0.9),
+    NumberSequenceKeypoint.new(0.5, 0.4),
+    NumberSequenceKeypoint.new(1, 0.9),
+}
+DivGrad.Parent = Divider
+
+-- ─── زر التشغيل ───
 local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size = UDim2.new(0.85, 0, 0, 35)
-ToggleBtn.Position = UDim2.new(0.075, 0, 0, 42)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-ToggleBtn.Text = "▶️ تشغيل السكربت"
+ToggleBtn.Size = UDim2.new(1, -20, 0, 36)
+ToggleBtn.Position = UDim2.new(0, 10, 0, 50)
+ToggleBtn.BackgroundColor3 = THEME.Success
+ToggleBtn.Text = "▶️  تشغيل"
 ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleBtn.TextSize = 14
 ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.AutoButtonColor = false
 ToggleBtn.Parent = Main
-Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
 
--- ⭐ شريط الحالة الجديد
+local ToggleGrad = Instance.new("UIGradient")
+ToggleGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 180, 90)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 230, 140)),
+}
+ToggleGrad.Rotation = 90
+ToggleGrad.Parent = ToggleBtn
+
+local ToggleStroke = Instance.new("UIStroke", ToggleBtn)
+ToggleStroke.Color = Color3.fromRGB(0, 255, 140)
+ToggleStroke.Thickness = 1
+ToggleStroke.Transparency = 0.5
+
+-- ─── شريط الحالة ───
+local StatusRow = Instance.new("Frame")
+StatusRow.Size = UDim2.new(1, -20, 0, 24)
+StatusRow.Position = UDim2.new(0, 10, 0, 94)
+StatusRow.BackgroundTransparency = 1
+StatusRow.Parent = Main
+
+local StatusDot = Instance.new("Frame")
+StatusDot.Size = UDim2.new(0, 8, 0, 8)
+StatusDot.Position = UDim2.new(0, 2, 0.5, -4)
+StatusDot.BackgroundColor3 = THEME.Warn
+StatusDot.BorderSizePixel = 0
+StatusDot.Parent = StatusRow
+Instance.new("UICorner", StatusDot).CornerRadius = UDim.new(1, 0)
+local DotStroke = Instance.new("UIStroke", StatusDot)
+DotStroke.Color = Color3.fromRGB(255, 255, 255)
+DotStroke.Thickness = 0.5
+DotStroke.Transparency = 0.6
+
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(0.85, 0, 0, 25)
-StatusLabel.Position = UDim2.new(0.075, 0, 0, 85)
+StatusLabel.Size = UDim2.new(1, -18, 1, 0)
+StatusLabel.Position = UDim2.new(0, 18, 0, 0)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "الحالة: جاهز"
-StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+StatusLabel.Text = "جاهز"
+StatusLabel.TextColor3 = THEME.TextMain
 StatusLabel.TextSize = 12
-StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.Font = Enum.Font.GothamMedium
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.Parent = Main
+StatusLabel.TextTruncate = Enum.TextTruncate.AtEnd
+StatusLabel.Parent = StatusRow
 
--- نصوص التعليمات
-local InfoText = Instance.new("TextLabel")
-InfoText.Size = UDim2.new(0.9, 0, 0, 70)
-InfoText.Position = UDim2.new(0.05, 0, 0, 115)
-InfoText.BackgroundTransparency = 1
-InfoText.Text = "📌 التعليمات:\n1. يمسك الصنارة ويرمي.\n2. ينتظر الصيد (60-120 ث).\n3. ينتظر 4 ثواني عند اللعبة.\n4. يصطاد ويعيد الكرة."
-InfoText.TextColor3 = Color3.fromRGB(150, 150, 150)
-InfoText.TextSize = 11
-InfoText.Font = Enum.Font.Gotham
-InfoText.TextXAlignment = Enum.TextXAlignment.Left
-InfoText.TextYAlignment = Enum.TextYAlignment.Top
-InfoText.TextWrapped = true
-InfoText.Parent = Main
+-- ─── قسم التعليمات ───
+local InfoSection = Instance.new("Frame")
+InfoSection.Size = UDim2.new(1, -20, 0, 76)
+InfoSection.Position = UDim2.new(0, 10, 0, 124)
+InfoSection.BackgroundTransparency = 1
+InfoSection.Parent = Main
 
--- زر مضاد AFK
-local AfkBtn = Instance.new("TextButton")
-AfkBtn.Size = UDim2.new(0.85, 0, 0, 32)
-AfkBtn.Position = UDim2.new(0.075, 0, 0, 195)
-AfkBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-AfkBtn.Text = "🛡️ مضاد AFK: مفعل"
-AfkBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-AfkBtn.TextSize = 12
-AfkBtn.Font = Enum.Font.GothamBold
-AfkBtn.Parent = Main
-Instance.new("UICorner", AfkBtn).CornerRadius = UDim.new(0, 6)
+local InfoTitle = Instance.new("TextLabel")
+InfoTitle.Size = UDim2.new(1, 0, 0, 16)
+InfoTitle.BackgroundTransparency = 1
+InfoTitle.Text = "📌  تعليمات"
+InfoTitle.TextColor3 = THEME.AccentLite
+InfoTitle.TextSize = 11
+InfoTitle.Font = Enum.Font.GothamBold
+InfoTitle.TextXAlignment = Enum.TextXAlignment.Left
+InfoTitle.Parent = InfoSection
 
--- زر تخفيف اللاك
-local LagBtn = Instance.new("TextButton")
-LagBtn.Size = UDim2.new(0.85, 0, 0, 32)
-LagBtn.Position = UDim2.new(0.075, 0, 0, 235)
-LagBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
-LagBtn.Text = "⚡ تخفيف اللاك: معطل"
-LagBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-LagBtn.TextSize = 12
-LagBtn.Font = Enum.Font.GothamBold
-LagBtn.Parent = Main
-Instance.new("UICorner", LagBtn).CornerRadius = UDim.new(0, 6)
+local InfoBody = Instance.new("TextLabel")
+InfoBody.Size = UDim2.new(1, 0, 0, 58)
+InfoBody.Position = UDim2.new(0, 0, 0, 18)
+InfoBody.BackgroundTransparency = 1
+InfoBody.Text = "• يمسك الصنارة ويرمي\n• ينتظر الصيد حتى 150 ثانية\n• يتعامل مع لعبة الصيد تلقائيًا\n• يعيد المحاولة عند الفشل"
+InfoBody.TextColor3 = THEME.TextDim
+InfoBody.TextSize = 11
+InfoBody.Font = Enum.Font.Gotham
+InfoBody.TextXAlignment = Enum.TextXAlignment.Left
+InfoBody.TextYAlignment = Enum.TextYAlignment.Top
+InfoBody.TextWrapped = true
+InfoBody.Parent = InfoSection
 
--- نص الحقوق
-local Footer = Instance.new("TextLabel")
-Footer.Size = UDim2.new(1, 0, 0, 20)
-Footer.Position = UDim2.new(0, 0, 1, -25)
-Footer.BackgroundTransparency = 1
-Footer.Text = "Delta Executor | v34"
-Footer.TextColor3 = Color3.fromRGB(100, 100, 100)
-Footer.TextSize = 9
-Footer.Font = Enum.Font.Gotham
-Footer.Parent = Main
+-- ==========================================
+-- 📝 SetStatus
+-- ==========================================
+local function SetStatus(text, color)
+    if StatusLabel then StatusLabel.Text = text end
+    if StatusDot and color then StatusDot.BackgroundColor3 = color end
+end
 
--- دالة السحب
+-- ==========================================
+-- ⏳ نافذة الانتظار
+-- ==========================================
+local WaitOverlay = Instance.new("Frame")
+WaitOverlay.Name = "WaitOverlay"
+WaitOverlay.Size = UDim2.new(0, 240, 0, 150)
+WaitOverlay.Position = UDim2.new(0.5, -120, 0.5, -75)
+WaitOverlay.BackgroundColor3 = THEME.BgMid
+WaitOverlay.BorderSizePixel = 0
+WaitOverlay.ClipsDescendants = true
+WaitOverlay.Visible = false
+WaitOverlay.ZIndex = 50
+WaitOverlay.Parent = ScreenGui
+Instance.new("UICorner", WaitOverlay).CornerRadius = UDim.new(0, 16)
+
+local WaitGrad = Instance.new("UIGradient")
+WaitGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 18)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 24, 40)),
+}
+WaitGrad.Rotation = 115
+WaitGrad.Parent = WaitOverlay
+
+local WaitStroke = Instance.new("UIStroke", WaitOverlay)
+WaitStroke.Color = THEME.AccentLite
+WaitStroke.Thickness = 2
+WaitStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+WaitStroke.ZIndex = 50
+TweenService:Create(WaitStroke, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.Accent}):Play()
+
+local WaitShine = Instance.new("Frame")
+WaitShine.Size = UDim2.new(1, -16, 0, 1)
+WaitShine.Position = UDim2.new(0, 8, 0, 0)
+WaitShine.BackgroundColor3 = Color3.fromRGB(120, 200, 255)
+WaitShine.BorderSizePixel = 0
+WaitShine.ZIndex = 52
+WaitShine.Parent = WaitOverlay
+Instance.new("UICorner", WaitShine).CornerRadius = UDim.new(1, 0)
+local WaitShineGrad = Instance.new("UIGradient")
+WaitShineGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.new(0,0,0)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(140, 220, 255)),
+    ColorSequenceKeypoint.new(1, Color3.new(0,0,0)),
+}
+WaitShineGrad.Transparency = NumberSequence.new{
+    NumberSequenceKeypoint.new(0, 1),
+    NumberSequenceKeypoint.new(0.5, 0.3),
+    NumberSequenceKeypoint.new(1, 1),
+}
+WaitShineGrad.Parent = WaitShine
+
+local WaitScale = Instance.new("UIScale")
+WaitScale.Scale = 1
+WaitScale.Parent = WaitOverlay
+
+local WaitTitle = Instance.new("TextLabel")
+WaitTitle.Size = UDim2.new(1, 0, 0, 28)
+WaitTitle.Position = UDim2.new(0, 0, 0, 16)
+WaitTitle.BackgroundTransparency = 1
+WaitTitle.Text = "⏳  انتظر 4 ثوانٍ"
+WaitTitle.TextColor3 = THEME.AccentLite
+WaitTitle.TextSize = 16
+WaitTitle.Font = Enum.Font.GothamBold
+WaitTitle.ZIndex = 51
+WaitTitle.Parent = WaitOverlay
+
+local WaitCount = Instance.new("TextLabel")
+WaitCount.Size = UDim2.new(1, 0, 0, 90)
+WaitCount.Position = UDim2.new(0, 0, 0, 48)
+WaitCount.BackgroundTransparency = 1
+WaitCount.Text = "4"
+WaitCount.TextColor3 = THEME.Warn
+WaitCount.TextSize = 64
+WaitCount.Font = Enum.Font.GothamBlack
+WaitCount.ZIndex = 51
+WaitCount.Parent = WaitOverlay
+
+local WaitSub = Instance.new("TextLabel")
+WaitSub.Size = UDim2.new(1, 0, 0, 18)
+WaitSub.Position = UDim2.new(0, 0, 1, -26)
+WaitSub.BackgroundTransparency = 1
+WaitSub.Text = "جارٍ تجهيز اللعبة..."
+WaitSub.TextColor3 = THEME.TextDim
+WaitSub.TextSize = 11
+WaitSub.Font = Enum.Font.Gotham
+WaitSub.ZIndex = 51
+WaitSub.Parent = WaitOverlay
+
+-- ==========================================
+-- 📱 استجابة الشاشة
+-- ==========================================
+local function UpdateScales()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    local s1 = math.min(1, math.min((vp.X * 0.9) / MAIN_WIDTH, (vp.Y * 0.85) / MAIN_FULL_HEIGHT))
+    MainScale.Scale = math.clamp(s1, 0.65, 1)
+    local s2 = math.min(1, math.min((vp.X * 0.9) / 240, (vp.Y * 0.85) / 150))
+    WaitScale.Scale = math.clamp(s2, 0.7, 1)
+end
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateScales)
+end
+UpdateScales()
+
+-- ==========================================
+-- 🖱️ سحب + clamp
+-- ==========================================
+local function ClampFramePosition(frame)
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    local abs = frame.AbsolutePosition
+    local sz = frame.AbsoluteSize
+    local nx = math.clamp(abs.X, 4, math.max(4, vp.X - sz.X - 4))
+    local ny = math.clamp(abs.Y, 4, math.max(4, vp.Y - sz.Y - 4))
+    if nx ~= abs.X or ny ~= abs.Y then
+        TweenService:Create(frame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0, nx, 0, ny)
+        }):Play()
+    end
+end
+
 local function MakeDraggable(frame, dragHandle)
     dragHandle = dragHandle or frame
     local dragging, dragInput, dragStart, startPos
     dragHandle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true; dragStart = input.Position; startPos = frame.Position
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    ClampFramePosition(frame)
+                end
             end)
         end
     end)
     dragHandle.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
     end)
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
@@ -193,198 +554,472 @@ local function MakeDraggable(frame, dragHandle)
 end
 
 MakeDraggable(FloatBtn)
-MakeDraggable(Main, Title)
+MakeDraggable(Main, TitleRow)
 
-FloatBtn.MouseButton1Click:Connect(function() Main.Visible = not Main.Visible end)
+-- ==========================================
+-- 🎬 انتقالات الظهور/الإخفاء
+-- ==========================================
+local visBusy = false
+local function AnimateShow()
+    visBusy = true
+    Main.Visible = true
+    local targetH = isMinimized and MAIN_MIN_HEIGHT or MAIN_FULL_HEIGHT
+    Main.Size = UDim2.new(0, MAIN_WIDTH * 0.85, 0, targetH * 0.85)
+    local t = TweenService:Create(Main, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, MAIN_WIDTH, 0, targetH)
+    })
+    t:Play()
+    t.Completed:Wait()
+    visBusy = false
+end
+local function AnimateHide()
+    visBusy = true
+    local curH = isMinimized and MAIN_MIN_HEIGHT or MAIN_FULL_HEIGHT
+    local t = TweenService:Create(Main, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, MAIN_WIDTH * 0.85, 0, curH * 0.85)
+    })
+    t:Play()
+    t.Completed:Wait()
+    Main.Visible = false
+    Main.Size = UDim2.new(0, MAIN_WIDTH, 0, curH)
+    visBusy = false
+end
 
--- وظيفة زر التصغير
+FloatBtn.MouseButton1Click:Connect(function()
+    if visBusy then return end
+    if Main.Visible then AnimateHide() else AnimateShow() end
+end)
+
 MinimizeBtn.MouseButton1Click:Connect(function()
-    if not isMinimized then
-        local tween = TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, 250, 0, 35)})
-        tween:Play()
-        MinimizeBtn.Text = "➕"
-        isMinimized = true
-    else
-        local tween = TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, 250, 0, 360)})
-        tween:Play()
+    if isMinimized then
+        TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_FULL_HEIGHT)
+        }):Play()
         MinimizeBtn.Text = "➖"
         isMinimized = false
+    else
+        TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_MIN_HEIGHT)
+        }):Play()
+        MinimizeBtn.Text = "➕"
+        isMinimized = true
     end
 end)
 
 -- ==========================================
--- 2. ميزات الحماية
+-- 🛡️ Anti-AFK
 -- ==========================================
 localPlayer.Idled:Connect(function()
-    if antiAfkEnabled then
-        pcall(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new(0, 0))
-        end)
-    end
-end)
-
-AfkBtn.MouseButton1Click:Connect(function()
-    antiAfkEnabled = not antiAfkEnabled
-    AfkBtn.Text = antiAfkEnabled and "🛡️ مضاد AFK: مفعل" or "🛡️ مضاد AFK: معطل"
-    AfkBtn.BackgroundColor3 = antiAfkEnabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(100, 50, 50)
-end)
-
-LagBtn.MouseButton1Click:Connect(function()
-    lagReduced = not lagReduced
-    if lagReduced then
-        LagBtn.Text = "⚡ تخفيف اللاك: مفعل"
-        LagBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if not obj:IsDescendantOf(localPlayer.Character) and not obj:IsDescendantOf(game:GetService("Players")) then
-                if obj:IsA("ParticleEmitter") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") or obj:IsA("Decal") or obj:IsA("Texture") then
-                    obj:Destroy()
-                end
-            end
-        end
-    else
-        LagBtn.Text = "⚡ تخفيف اللاك: معطل"
-        LagBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
-    end
-end)
-
--- ==========================================
--- 3. خيط مراقبة اللعبة (مستقل تماماً)
--- ==========================================
-if Remotes.MinigameCommand then
-    Remotes.MinigameCommand.OnClientEvent:Connect(function(cmd, guid)
-        if cmd == "Start" and guid and isRunning then
-            local currentGUID = tostring(guid)
-            task.spawn(function()
-                StatusLabel.Text = "الحالة: لعبة ظهرت! انتظار 4ث..."
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
-                task.wait(4)
-                
-                if isRunning then
-                    StatusLabel.Text = "الحالة: جاري إرسال Complete..."
-                    StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-                    pcall(function()
-                        Remotes.MinigameAction:FireServer("Complete", currentGUID)
-                    end)
-                end
-            end)
-        end
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new(0, 0))
     end)
+end)
+
+-- ==========================================
+-- أدوات مساعدة
+-- ==========================================
+local function IsFailureStatus(s)
+    if type(s) ~= "string" then return false end
+    local l = string.lower(s)
+    if string.find(l, "fail", 1, true) then return true end
+    if string.find(l, "cancel", 1, true) then return true end
+    if string.find(l, "lost", 1, true) then return true end
+    if string.find(l, "error", 1, true) then return true end
+    return false
 end
 
-if Remotes.Status then
-    Remotes.Status.OnClientEvent:Connect(function(status)
-        if type(status) == "string" then LastStatus = status end
-    end)
+local function IsToolValid(tool)
+    if not tool then return false end
+    local ln = string.lower(tool.Name)
+    return (string.find(ln, "rod") or string.find(ln, "fishing")) and true or false
 end
 
--- ==========================================
--- 4. خيط الرمي والانتظار
--- ==========================================
 local function EquipRod()
     local char = localPlayer.Character
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
-
-    local equipped = char:FindFirstChildOfClass("Tool")
-    if equipped and (string.find(string.lower(equipped.Name), "rod") or string.find(string.lower(equipped.Name), "fishing")) then
-        return true 
-    end
-
-    local backpack = localPlayer:FindFirstChild("Backpack")
-    if backpack then
-        for _, tool in ipairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") and (string.find(string.lower(tool.Name), "rod") or string.find(string.lower(tool.Name), "fishing")) then
-                hum:EquipTool(tool)
-                task.wait(0.5) 
-                return true
+    local eq = char:FindFirstChildOfClass("Tool")
+    if eq and IsToolValid(eq) then return true end
+    local bp = localPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") and IsToolValid(tool) then
+                local ok = pcall(function() hum:EquipTool(tool) end)
+                if ok then task.wait(0.5); return true end
             end
         end
     end
     return false
 end
 
-local function AutoFishLoop()
-    task.spawn(function()
-        while isRunning do
-            StatusLabel.Text = "الحالة: جاري مسك الصنارة..."
-            StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-            
-            if not EquipRod() then
-                task.wait(2)
-                continue
-            end
+local function ForceToolReset()
+    local char = localPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    Diag("ForceToolReset: unequip all")
+    pcall(function() hum:UnequipTools() end)
+    task.wait(CONFIG.TOOL_RESET_WAIT)
+    local ok = EquipRod()
+    Diag("ForceToolReset: re-equip " .. (ok and "OK" or "FAILED"))
+    return ok
+end
 
-            local char = localPlayer.Character
-            local tool = char and char:FindFirstChildOfClass("Tool")
-            if tool then
-                pcall(function() tool:Deactivate() end)
-            end
-            task.wait(0.5)
-
-            if tool then
-                StatusLabel.Text = "الحالة: جاري الرمي..."
-                pcall(function() tool:Activate() end)
-                task.wait(1.2) 
-                pcall(function() tool:Deactivate() end)
-            end
-
-            local timer = 0
-            local castSuccess = false
-            while isRunning and timer < 3 do
-                if LastStatus == "Searching" or LastStatus == "LongWaitStart" then
-                    castSuccess = true
-                    break
-                elseif LastStatus == "CastFailed" then
-                    break
-                end
-                
-                if not char:FindFirstChildOfClass("Tool") then break end
-                task.wait(0.2)
-                timer = timer + 0.2
-            end
-            
-            if not castSuccess then
-                StatusLabel.Text = "الحالة: فشل الرمي، إعادة..."
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-                task.wait(1)
-                continue
-            end
-
-            StatusLabel.Text = "الحالة: في انتظار السمكة..."
-            StatusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
-            
-            timer = 0
-            -- ننتظر لحد ما تصير الحالة Caught (الخيط الثاني هو اللي يرسل Complete)
-            while isRunning and LastStatus ~= "Caught" and timer < 120 do
-                if not char:FindFirstChildOfClass("Tool") then break end
-                task.wait(0.5)
-                timer = timer + 0.5
-            end
-
-            if LastStatus == "Caught" then
-                StatusLabel.Text = "الحالة: ✅ تم الصيد بنجاح!"
-                StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
-            end
-
-            task.wait(3)
+-- ==========================================
+-- ⏳ نافذة الانتظار - ظهور/اختفاء سلس
+-- ==========================================
+local waitVisGen = 0
+local function ShowWaitOverlay()
+    waitVisGen = waitVisGen + 1
+    WaitOverlay.Visible = true
+    WaitOverlay.Size = UDim2.new(0, 240 * 0.85, 0, 150 * 0.85)
+    WaitOverlay.Position = UDim2.new(0.5, -240 * 0.425, 0.5, -150 * 0.425)
+    local t = TweenService:Create(WaitOverlay, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 240, 0, 150),
+        Position = UDim2.new(0.5, -120, 0.5, -75)
+    })
+    t:Play()
+end
+local function HideWaitOverlay()
+    waitVisGen = waitVisGen + 1
+    local myGen = waitVisGen
+    local t = TweenService:Create(WaitOverlay, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, 240 * 0.85, 0, 150 * 0.85),
+        Position = UDim2.new(0.5, -240 * 0.425, 0.5, -150 * 0.425)
+    })
+    t:Play()
+    t.Completed:Connect(function()
+        if waitVisGen == myGen then
+            WaitOverlay.Visible = false
+            WaitOverlay.Size = UDim2.new(0, 240, 0, 150)
+            WaitOverlay.Position = UDim2.new(0.5, -120, 0.5, -75)
         end
     end)
 end
 
+-- ==========================================
+-- Minigame + GUID
+-- ==========================================
+local waitGeneration = 0
+local processedGuids = {}
+local processedQueue = {}
+
+local function MarkGuidProcessed(guid)
+    if processedGuids[guid] then return end
+    processedGuids[guid] = true
+    table.insert(processedQueue, guid)
+    if #processedQueue > 20 then
+        local old = table.remove(processedQueue, 1)
+        processedGuids[old] = nil
+    end
+end
+
+local function CancelWait()
+    waitGeneration = waitGeneration + 1
+    HideWaitOverlay()
+    CurrentGUID = nil
+end
+
+local function ShowWaitAndComplete(guid)
+    local myGuid = tostring(guid)
+    if processedGuids[myGuid] then return end
+    local myGen = waitGeneration + 1
+    waitGeneration = myGen
+    CurrentGUID = myGuid
+    ShowWaitOverlay()
+    WaitTitle.Text = "⏳  انتظر 4 ثوانٍ"
+    WaitCount.Text = "4"
+    WaitSub.Text = "جارٍ تجهيز اللعبة..."
+    SetStatus("لعبة صيد — انتظار...", THEME.Warn)
+    Diag("Minigame Start GUID=" .. myGuid)
+    task.spawn(function()
+        for i = 4, 1, -1 do
+            if waitGeneration ~= myGen or not isRunning then
+                if waitGeneration == myGen then HideWaitOverlay() end
+                return
+            end
+            WaitCount.Text = tostring(i)
+            task.wait(1)
+        end
+        if waitGeneration ~= myGen or not isRunning then
+            if waitGeneration == myGen then HideWaitOverlay() end
+            return
+        end
+        SetStatus("إنهاء اللعبة المصغرة...", THEME.AccentLite)
+        local ok = pcall(function()
+            Remotes.MinigameAction:FireServer("Complete", myGuid)
+        end)
+        Diag("Complete sent for GUID=" .. myGuid .. " ok=" .. tostring(ok))
+        if ok then MarkGuidProcessed(myGuid) end
+        if waitGeneration == myGen then HideWaitOverlay() end
+    end)
+end
+
+if Remotes.MinigameCommand then
+    Remotes.MinigameCommand.OnClientEvent:Connect(function(cmd, guid)
+        if cmd == "Start" and guid and isRunning then
+            local g = tostring(guid)
+            if (WaitOverlay.Visible and CurrentGUID == g) or processedGuids[g] then return end
+            ShowWaitAndComplete(g)
+        end
+    end)
+end
+
+-- ==========================================
+-- مستمع الحالة
+-- ==========================================
+if Remotes.Status then
+    Remotes.Status.OnClientEvent:Connect(function(status)
+        local newStatus = nil
+        if type(status) == "string" then
+            newStatus = status
+        elseif type(status) == "table" then
+            newStatus = status.status or status.Status
+        end
+        if type(newStatus) == "string" then
+            LastStatus = newStatus
+            LastStatusTime = tick()
+            statusVersion = statusVersion + 1
+            Diag("Status event: " .. tostring(newStatus) .. " (v=" .. statusVersion .. ")")
+        end
+    end)
+end
+
+-- ==========================================
+-- 🎣 محاولة صيد واحدة
+-- ==========================================
+local function RunOneAttempt(myLoopId)
+    currentAttemptId = currentAttemptId + 1
+    local myAttemptId = currentAttemptId
+    attemptStartTick = tick()
+
+    CancelWait()
+
+    local castStartVersion = statusVersion
+    Diag("=== Attempt " .. myAttemptId .. " start, statusVersion=" .. castStartVersion .. " ===")
+
+    SetStatus("تجهيز الصنارة...", THEME.AccentLite)
+    if not EquipRod() then
+        Diag("Equip failed")
+        SetStatus("تعذّر تجهيز الصنارة", THEME.Danger)
+        return "equip_failed"
+    end
+    if not isRunning or autoFishLoopId ~= myLoopId then return "cancelled" end
+
+    local char = localPlayer.Character
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if not IsToolValid(tool) then
+        Diag("Equipped tool is not a rod")
+        SetStatus("تعذّر تجهيز الصنارة", THEME.Danger)
+        return "equip_failed"
+    end
+    Diag("Tool verified: " .. tool.Name)
+
+    pcall(function() tool:Deactivate() end)
+    task.wait(0.3)
+
+    SetStatus("رمي الصنارة...", THEME.AccentLite)
+    local activateTime = tick()
+    Diag("Firing Activate at t=0")
+    local activateOk = pcall(function() tool:Activate() end)
+    Diag("Activate result=" .. tostring(activateOk))
+
+    task.wait(CONFIG.CAST_DEACTIVATE_WAIT)
+    Diag("Firing Deactivate after " .. CONFIG.CAST_DEACTIVATE_WAIT .. "s")
+    pcall(function()
+        if tool and tool.Parent then tool:Deactivate() end
+    end)
+
+    local castStart = tick()
+    local castOk, castFailReason, castFailStatus = false, nil, nil
+    local toolLostAt = nil
+
+    while isRunning and autoFishLoopId == myLoopId do
+        local c = localPlayer.Character
+        if not c then castFailReason = "character_lost"; break end
+
+        if tick() - castStart > CONFIG.CAST_TIMEOUT then
+            castFailReason = "cast_timeout"
+            break
+        end
+
+        local eq = c:FindFirstChildOfClass("Tool")
+        if not eq then
+            if not toolLostAt then toolLostAt = tick() end
+            if tick() - toolLostAt > CONFIG.TOOL_LOST_GRACE then
+                castFailReason = "tool_lost_during_cast"
+                break
+            end
+        else
+            toolLostAt = nil
+        end
+
+        if statusVersion > castStartVersion then
+            local curStatus = LastStatus
+            castStartVersion = statusVersion
+            local dt = tick() - activateTime
+            Diag(string.format("Cast response: %s @ +%.2fs", tostring(curStatus), dt))
+
+            if curStatus == "Searching" or curStatus == "LongWaitStart" then
+                Diag("Cast ACCEPTED")
+                castOk = true
+                break
+            elseif IsFailureStatus(curStatus) then
+                castFailReason = "cast_status_fail"
+                castFailStatus = curStatus
+                break
+            else
+                Diag("Intermediate status (kept waiting): " .. tostring(curStatus))
+            end
+        end
+
+        task.wait(0.1)
+    end
+
+    if not castOk then
+        SetStatus(GetUserFailureMessage(castFailStatus, castFailReason), THEME.Danger)
+        Diag("Cast FAILED reason=" .. tostring(castFailReason) .. " status=" .. tostring(castFailStatus))
+        pcall(function()
+            local c2 = localPlayer.Character
+            local t2 = c2 and c2:FindFirstChildOfClass("Tool")
+            if t2 then t2:Deactivate() end
+        end)
+        if not (isRunning and autoFishLoopId == myLoopId) then
+            return "cancelled"
+        end
+        ForceToolReset()
+        return "cast_failed"
+    end
+
+    SetStatus("في انتظار السمكة...", THEME.AccentLite)
+    local fishStartVersion = statusVersion
+    local fishStart = tick()
+    local success, failReason = false, nil
+
+    while isRunning and autoFishLoopId == myLoopId do
+        local c = localPlayer.Character
+        local eq = c and c:FindFirstChildOfClass("Tool")
+        local bp = localPlayer:FindFirstChild("Backpack")
+        local bpTool = bp and bp:FindFirstChildWhichIsA("Tool")
+        if not eq and not bpTool then
+            failReason = "tool_deleted"
+            break
+        end
+
+        if statusVersion > fishStartVersion then
+            local curStatus = LastStatus
+            fishStartVersion = statusVersion
+            Diag("Fish status: " .. tostring(curStatus))
+            if curStatus == "Caught" then
+                success = true
+                break
+            elseif IsFailureStatus(curStatus) then
+                failReason = "fish_status_fail:" .. tostring(curStatus)
+                break
+            end
+        end
+
+        if tick() - fishStart > CONFIG.FISH_TIMEOUT then
+            failReason = "fish_timeout"
+            break
+        end
+
+        task.wait(0.2)
+    end
+
+    if success then
+        SetStatus("تم الصيد بنجاح", THEME.Success)
+        Diag("Fish SUCCESS")
+        local waitUntil = tick() + CONFIG.MINIGAME_WAIT_GRACE
+        while isRunning and autoFishLoopId == myLoopId and WaitOverlay.Visible and tick() < waitUntil do
+            task.wait(0.2)
+        end
+        task.wait(CONFIG.POST_CATCH_DELAY)
+        return "success"
+    else
+        SetStatus(GetUserFailureMessage(nil, failReason), THEME.Danger)
+        Diag("Fish FAILED reason=" .. tostring(failReason))
+        if not (isRunning and autoFishLoopId == myLoopId) then
+            return "cancelled"
+        end
+        return "failed"
+    end
+end
+
+-- ==========================================
+-- 🔁 حلقة الصيد
+-- ==========================================
+local function AutoFishLoop()
+    autoFishLoopId = autoFishLoopId + 1
+    local myLoopId = autoFishLoopId
+    task.spawn(function()
+        local consecutiveFails, castFailStreak = 0, 0
+        while isRunning and autoFishLoopId == myLoopId do
+            local result = "failed"
+            local ok, err = pcall(function()
+                result = RunOneAttempt(myLoopId) or "failed"
+            end)
+            if not ok then
+                warn("[AutoFish] Attempt crashed:", err)
+                Diag("Attempt crashed: " .. tostring(err))
+                result = "error"
+                SetStatus("حدث خطأ — إعادة المحاولة", THEME.Danger)
+            end
+
+            if not (isRunning and autoFishLoopId == myLoopId) then break end
+
+            attemptStartTick = 0
+
+            if result == "success" then
+                consecutiveFails, castFailStreak = 0, 0
+            elseif result == "cancelled" then
+                break
+            elseif result == "cast_failed" then
+                castFailStreak = castFailStreak + 1
+                consecutiveFails = consecutiveFails + 1
+                local baseDelay = (castFailStreak >= CONFIG.CONSECUTIVE_FAILS)
+                    and CONFIG.LONG_RETRY_DELAY or CONFIG.CAST_FAIL_RETRY_DELAY
+                local extra = (castFailStreak >= 5) and math.min(castFailStreak * 2, 15) or 0
+                local delay = math.max(baseDelay, extra)
+                SetStatus("فشل الرمي — إعادة المحاولة", THEME.Danger)
+                Diag("CastFailed streak=" .. castFailStreak .. ", waiting " .. delay .. "s")
+                task.wait(delay)
+            else
+                consecutiveFails = consecutiveFails + 1
+                local delay = (consecutiveFails >= CONFIG.CONSECUTIVE_FAILS)
+                    and CONFIG.LONG_RETRY_DELAY or CONFIG.RETRY_DELAY
+                task.wait(delay)
+            end
+        end
+    end)
+end
+
+-- ==========================================
+-- ▶️ زر التشغيل/الإطفاء
+-- ==========================================
 ToggleBtn.MouseButton1Click:Connect(function()
     isRunning = not isRunning
     if isRunning then
-        ToggleBtn.Text = "⏹️ إطفاء السكربت"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        ToggleBtn.Text = "⏹️  إيقاف"
+        ToggleBtn.BackgroundColor3 = THEME.Danger
+        ToggleGrad.Color = ColorSequence.new{
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(200, 40, 60)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(240, 80, 100)),
+        }
+        ToggleStroke.Color = THEME.DangerLt
+        Diag("=== Script STARTED ===")
         AutoFishLoop()
     else
-        ToggleBtn.Text = "▶️ تشغيل السكربت"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-        StatusLabel.Text = "الحالة: متوقف"
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        ToggleBtn.Text = "▶️  تشغيل"
+        ToggleBtn.BackgroundColor3 = THEME.Success
+        ToggleGrad.Color = ColorSequence.new{
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 180, 90)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 230, 140)),
+        }
+        ToggleStroke.Color = Color3.fromRGB(0, 255, 140)
+        SetStatus("متوقف", THEME.TextDim)
+        Diag("=== Script STOPPED ===")
+        CancelWait()
     end
 end)
