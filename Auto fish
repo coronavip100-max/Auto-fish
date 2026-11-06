@@ -1,5 +1,5 @@
 -- ==========================================
--- Ultimate Auto-Fish v52 (Premium UI + Fast Sell)
+-- Ultimate Auto-Fish v74 (Glass UI + Respawn Fix)
 -- ==========================================
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -8,6 +8,8 @@ task.wait(1)
 local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
 local OldCoordGui = PlayerGui:FindFirstChild("CoordViewerUI")
 if OldCoordGui then OldCoordGui:Destroy() end
+local OldFishUI = PlayerGui:FindFirstChild("PremiumFishUI")
+if OldFishUI then OldFishUI:Destroy() end
 
 local CONFIG = {
     FISH_TIMEOUT          = 150,
@@ -17,24 +19,19 @@ local CONFIG = {
     MINIGAME_WAIT_GRACE   = 6,
     CAST_DEACTIVATE_WAIT  = 1.2,
     TOOL_RESET_WAIT       = 0.6,
-    WATCHDOG_TIMEOUT      = 8,
-    HIDE_FALLBACK_DELAY   = 0.25,
+    AUTO_SELL_INTERVAL    = 600, -- 10 دقائق
 }
 
 local THEME = {
-    BgDeep     = Color3.fromRGB(8, 8, 14),
-    BgMid      = Color3.fromRGB(14, 14, 22),
-    BgSoft     = Color3.fromRGB(24, 24, 36),
-    BgHover    = Color3.fromRGB(34, 34, 48),
-    Accent     = Color3.fromRGB(0, 140, 255),
-    AccentLite = Color3.fromRGB(0, 220, 255),
-    Success    = Color3.fromRGB(0, 210, 120),
-    SuccessLt  = Color3.fromRGB(0, 240, 140),
-    Danger     = Color3.fromRGB(230, 60, 80),
-    DangerLt   = Color3.fromRGB(255, 90, 110),
-    Warn       = Color3.fromRGB(255, 190, 60),
-    TextMain   = Color3.fromRGB(230, 235, 245),
-    TextDim    = Color3.fromRGB(140, 150, 170),
+    BgMain     = Color3.fromRGB(15, 17, 26),
+    BgGlass    = Color3.fromRGB(25, 28, 40),
+    BgSoft     = Color3.fromRGB(35, 40, 55),
+    Accent     = Color3.fromRGB(100, 150, 255), 
+    AccentGlow = Color3.fromRGB(0, 200, 255),   
+    Success    = Color3.fromRGB(50, 220, 120),  
+    Danger     = Color3.fromRGB(255, 80, 100),  
+    TextMain   = Color3.fromRGB(255, 255, 255),
+    TextDim    = Color3.fromRGB(160, 170, 190),
 }
 
 local RS = game:GetService("ReplicatedStorage")
@@ -42,7 +39,6 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
-local RunService = game:GetService("RunService")
 local localPlayer = Players.LocalPlayer
 
 local Net = RS.Services.CommunityModules.RbxNet._NetManaged
@@ -53,60 +49,57 @@ local Remotes = {
     InventoryAction = Net:FindFirstChild("Fishing/InventoryAction"),
 }
 
--- 🐟 قائمة بكل الأسماك
 local FISH_NAMES = {
-    "Orca", "Megalodon", "Shark", "Sailfish", "Hammerhead Shark",
-    "Whale Shark", "Frilled shark", "Stalker", "Plesiosaurus", "Sea Angel",
-    "Seahorse", "Koi Fish", "Can of Beans", "Blue Marlin", "Humpback Whale",
-    "Salmon", "Anglerfish", "Dogfish Shark", "Beluga Whale", "Mugil",
-    "Dead Fish", "Empty Can", "Rubber Duck", "Green fish", "Lobster",
-    "Mahi-Mahi", "Clown Fish", "Star Fish", "Puffer Fish", "Blue fish",
-    "Tuna", "Gold Fish", "Oncorhynchus mykiss", "Squid"
+    "Orca", "Megalodon", "Shark", "Sailfish", "Hammerhead Shark", "Whale Shark", 
+    "Frilled shark", "Stalker", "Plesiosaurus", "Sea Angel", "Seahorse", "Koi Fish", 
+    "Can of Beans", "Blue Marlin", "Humpback Whale", "Salmon", "Anglerfish", 
+    "Dogfish Shark", "Beluga Whale", "Mugil", "Dead Fish", "Empty Can", "Rubber Duck", 
+    "Green fish", "Lobster", "Mahi-Mahi", "Clown Fish", "Star Fish", "Puffer Fish", 
+    "Blue fish", "Tuna", "Gold Fish", "Oncorhynchus mykiss", "Squid"
 }
 
 local FISHING_LOCATIONS = {
-    { name = "صيد السمك 1",  pos = Vector3.new(-63.41, -301.12, 612.08) },
-    { name = "صيد السمك 2",  pos = Vector3.new(-320.90, -305.32, 420.20) },
-    { name = "صيد السمك 3",  pos = Vector3.new(-510.20, -314.84, 484.68) },
-    { name = "صيد السمك 4",  pos = Vector3.new(-523.36, -314.84, 686.12) },
-    { name = "صيد السمك 5",  pos = Vector3.new(-556.10, -305.13, 371.61) },
-    { name = "صيد السمك 6",  pos = Vector3.new(-406.66, -315.75, -257.04) },
-    { name = "صيد السمك 8",  pos = Vector3.new(-308.07, -315.30, -411.26) },
-    { name = "صيد السمك 9",  pos = Vector3.new(-582.14, -315.75, -327.97) },
-    { name = "صيد السمك 10", pos = Vector3.new(-582.14, -315.75, -366.02) },
+    { name = "صيد 1",  pos = Vector3.new(-63.41, -301.12, 612.08) },
+    { name = "صيد 2",  pos = Vector3.new(-320.90, -305.32, 420.20) },
+    { name = "صيد 3",  pos = Vector3.new(-510.20, -314.84, 484.68) },
+    { name = "صيد 4",  pos = Vector3.new(-523.36, -314.84, 686.12) },
+    { name = "صيد 5",  pos = Vector3.new(-556.10, -305.13, 371.61) },
+    { name = "صيد 6",  pos = Vector3.new(-406.66, -315.75, -257.04) },
+    { name = "صيد 8",  pos = Vector3.new(-308.07, -315.30, -411.26) },
+    { name = "صيد 9",  pos = Vector3.new(-582.14, -315.75, -327.97) },
+    { name = "صيد 10", pos = Vector3.new(-582.14, -315.75, -366.02) },
 }
 local SELLING_LOCATIONS = {
-    { name = "بيع السمك 1", pos = Vector3.new(-346.26, -313.79, 583.19) },
-    { name = "بيع السمك 2", pos = Vector3.new(-303.64, -314.59, -424.63) },
+    { name = "بيع 1", pos = Vector3.new(-346.26, -313.79, 583.19) },
+    { name = "بيع 2", pos = Vector3.new(-303.64, -314.59, -424.63) },
 }
 
-local isRunning        = false
-local isMinimized      = false
-local isSelling        = false
-local LastStatus       = "idle"
-local statusVersion    = 0
-local autoFishLoopId   = 0
-local currentAttemptId = 0
-local CurrentGUID      = nil
-local attemptStartTick = 0
+local isRunning = false
+local isMinimized = false
+local isAutoSell = false
+local totalCaught = 0
+local startTime = tick()
+local lastAutoSellTime = tick()
 
-local MAIN_WIDTH              = 260
-local MAIN_MIN_HEIGHT         = 38
-local MAIN_BASE_HEIGHT        = 138
-local MAIN_FULL_HEIGHT_INFO   = 195
-local MAIN_FULL_HEIGHT_SETTINGS = 300 
+local LastStatus = "idle"
+local statusVersion = 0
+local autoFishLoopId = 0
+local waitGeneration = 0
 
-local InfoPanel, SettingsPanel, ScrollFrame, ScrollArrow
+local MAIN_WIDTH = 300
+local MAIN_HEIGHT = 340
+local MAIN_MIN_HEIGHT = 48
+local CurrentTab = "Fishing"
 
-local function GetTargetHeight()
-    if isMinimized then return MAIN_MIN_HEIGHT end
-    if InfoPanel and InfoPanel.Visible then return MAIN_FULL_HEIGHT_INFO end
-    if SettingsPanel and SettingsPanel.Visible then return MAIN_FULL_HEIGHT_SETTINGS end
-    return MAIN_BASE_HEIGHT
+local Main, TabBar, ContentArea, StatusLabel, ToggleBtn, AutoSellSwitch, SwitchDot, StatCaught, StatTime, StatStatus, FloatBtn
+
+local function SetStatus(text, color)
+    if StatusLabel then StatusLabel.Text = "● " .. text; StatusLabel.TextColor3 = color end
+    if StatStatus then StatStatus.Text = text end
 end
 
 -- ==========================================
--- الواجهة الأساسية
+-- تصميم الواجهة الأساسية
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PremiumFishUI"
@@ -114,628 +107,604 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999
 ScreenGui.Parent = PlayerGui
 
-local FloatBtn = Instance.new("TextButton")
-FloatBtn.Size = UDim2.new(0, 46, 0, 46)
-FloatBtn.Position = UDim2.new(0, 15, 0.4, 0)
-FloatBtn.BackgroundColor3 = THEME.BgDeep
+-- ==========================================
+-- 🔥 زر الفتح العائم (احترافي وقابل للسحب)
+-- ==========================================
+FloatBtn = Instance.new("TextButton")
+FloatBtn.Size = UDim2.new(0, 55, 0, 55)
+FloatBtn.Position = UDim2.new(0, 20, 0.4, 0)
+FloatBtn.BackgroundColor3 = THEME.BgMain
 FloatBtn.Text = "🎣"
-FloatBtn.TextSize = 22
+FloatBtn.TextSize = 26
 FloatBtn.Font = Enum.Font.GothamBold
-FloatBtn.TextColor3 = THEME.AccentLite
+FloatBtn.TextColor3 = THEME.AccentGlow
 FloatBtn.AutoButtonColor = false
 FloatBtn.Active = true
+FloatBtn.ZIndex = 100 -- فوق كل شي
 FloatBtn.Parent = ScreenGui
 Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(1, 0)
-local FloatGrad = Instance.new("UIGradient")
-FloatGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 16)), ColorSequenceKeypoint.new(1, Color3.fromRGB(28, 28, 44))}
-FloatGrad.Rotation = 135
-FloatGrad.Parent = FloatBtn
-local FloatStroke = Instance.new("UIStroke", FloatBtn)
-FloatStroke.Color = THEME.Accent
-FloatStroke.Thickness = 2
-FloatStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-TweenService:Create(FloatStroke, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.AccentLite}):Play()
 
-local Main = Instance.new("Frame")
-Main.Name = "Main"
-Main.Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_BASE_HEIGHT)
-Main.Position = UDim2.new(0.5, -MAIN_WIDTH/2, 0.5, -MAIN_BASE_HEIGHT/2)
-Main.BackgroundColor3 = THEME.BgMid
+local FBtnGrad = Instance.new("UIGradient")
+FBtnGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 17, 26)), 
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(35, 40, 55))
+}
+FBtnGrad.Rotation = 135
+FBtnGrad.Parent = FloatBtn
+
+local FStroke = Instance.new("UIStroke", FloatBtn)
+FStroke.Color = THEME.Accent
+FStroke.Thickness = 2.5
+FStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+TweenService:Create(FStroke, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.AccentGlow}):Play()
+
+task.spawn(function()
+    while true do
+        task.wait(2)
+        TweenService:Create(FloatBtn, TweenInfo.new(0.3), {Size = UDim2.new(0, 60, 0, 60)}):Play()
+        task.wait(0.3)
+        TweenService:Create(FloatBtn, TweenInfo.new(0.3), {Size = UDim2.new(0, 55, 0, 55)}):Play()
+    end
+end)
+
+-- النافذة الرئيسية
+Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_HEIGHT)
+Main.Position = UDim2.new(0.5, -MAIN_WIDTH/2, 0.5, -MAIN_HEIGHT/2)
+Main.BackgroundColor3 = THEME.BgMain
+Main.BackgroundTransparency = 0.05
 Main.BorderSizePixel = 0
 Main.ClipsDescendants = true
 Main.Active = true
 Main.Visible = true
 Main.Parent = ScreenGui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
-local MainGrad = Instance.new("UIGradient")
-MainGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 16)), ColorSequenceKeypoint.new(0.6, Color3.fromRGB(16, 16, 26)), ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 36))}
-MainGrad.Rotation = 115
-MainGrad.Parent = Main
-local MainStroke = Instance.new("UIStroke", Main)
-MainStroke.Color = THEME.Accent
-MainStroke.Thickness = 1.8
-MainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-TweenService:Create(MainStroke, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.AccentLite}):Play()
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 16)
 
-local MainScale = Instance.new("UIScale")
-MainScale.Scale = 1
-MainScale.Parent = Main
+local MStroke = Instance.new("UIStroke", Main)
+MStroke.Color = THEME.Accent
+MStroke.Thickness = 1.5
+MStroke.Transparency = 0.5
+TweenService:Create(MStroke, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.AccentGlow}):Play()
 
+-- شريط العنوان
 local TitleRow = Instance.new("Frame")
-TitleRow.Size = UDim2.new(1, 0, 0, 38)
+TitleRow.Size = UDim2.new(1, 0, 0, 48)
 TitleRow.BackgroundTransparency = 1
 TitleRow.Parent = Main
 
-local IconFrame = Instance.new("Frame")
-IconFrame.Size = UDim2.new(0, 26, 0, 26)
-IconFrame.Position = UDim2.new(0, 10, 0.5, -13)
-IconFrame.BackgroundColor3 = THEME.Accent
-IconFrame.BorderSizePixel = 0
-IconFrame.Parent = TitleRow
-Instance.new("UICorner", IconFrame).CornerRadius = UDim.new(1, 0)
-local IconGrad = Instance.new("UIGradient")
-IconGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, THEME.Accent), ColorSequenceKeypoint.new(1, THEME.AccentLite)}
-IconGrad.Rotation = 135
-IconGrad.Parent = IconFrame
-local IconText = Instance.new("TextLabel")
-IconText.Size = UDim2.new(1, 0, 1, 0)
-IconText.BackgroundTransparency = 1
-IconText.Text = "🎣"
-IconText.TextSize = 14
-IconText.Parent = IconFrame
-
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -140, 0, 26)
-Title.Position = UDim2.new(0, 44, 0.5, -13)
+Title.Size = UDim2.new(1, -120, 1, 0)
+Title.Position = UDim2.new(0, 20, 0, 0)
 Title.BackgroundTransparency = 1
 Title.Text = "Auto-Fish"
 Title.TextColor3 = THEME.TextMain
-Title.TextSize = 16
+Title.TextSize = 18
 Title.Font = Enum.Font.GothamBold
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = TitleRow
 
 local function makeTitleBtn(text, xOffset)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 26, 0, 26)
-    btn.Position = UDim2.new(1, xOffset, 0.5, -13)
-    btn.BackgroundColor3 = THEME.BgSoft
+    btn.Size = UDim2.new(0, 30, 0, 30)
+    btn.Position = UDim2.new(1, xOffset, 0.5, -15)
+    btn.BackgroundColor3 = THEME.BgGlass
     btn.Text = text
     btn.TextColor3 = THEME.TextDim
-    btn.TextSize = 13
+    btn.TextSize = 14
     btn.Font = Enum.Font.GothamBold
     btn.AutoButtonColor = false
     btn.Parent = TitleRow
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
-    local s = Instance.new("UIStroke", btn)
-    s.Color = Color3.fromRGB(50, 50, 70)
-    s.Thickness = 1
-    s.Transparency = 0.4
-    btn.MouseEnter:Connect(function() TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.BgHover}):Play() end)
-    btn.MouseLeave:Connect(function() TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.BgSoft}):Play() end)
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(1, 0)
     return btn
 end
 
-local InfoBtn     = makeTitleBtn("📌", -96)
-local SettingsBtn = makeTitleBtn("⚙️", -66)
-local MinimizeBtn = makeTitleBtn("➖", -36)
+local MinimizeBtn = makeTitleBtn("➖", -85)
+local HideBtn = makeTitleBtn("✖", -45)
 
-local Divider = Instance.new("Frame")
-Divider.Size = UDim2.new(1, -20, 0, 1)
-Divider.Position = UDim2.new(0, 10, 0, 40)
-Divider.BackgroundColor3 = Color3.fromRGB(40, 50, 70)
-Divider.BorderSizePixel = 0
-Divider.Parent = Main
+-- شريط التبويبات
+TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(1, -20, 0, 40)
+TabBar.Position = UDim2.new(0, 10, 0, 48)
+TabBar.BackgroundColor3 = THEME.BgGlass
+TabBar.BackgroundTransparency = 0.3
+TabBar.Parent = Main
+Instance.new("UICorner", TabBar).CornerRadius = UDim.new(0, 10)
 
-local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size = UDim2.new(1, -20, 0, 36)
-ToggleBtn.Position = UDim2.new(0, 10, 0, 50)
-ToggleBtn.BackgroundColor3 = THEME.Success
-ToggleBtn.Text = "▶️  تشغيل"
-ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleBtn.TextSize = 14
-ToggleBtn.Font = Enum.Font.GothamBold
-ToggleBtn.AutoButtonColor = false
-ToggleBtn.Parent = Main
-Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
-local ToggleGrad = Instance.new("UIGradient")
-ToggleGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 180, 90)), ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 230, 140))}
-ToggleGrad.Rotation = 90
-ToggleGrad.Parent = ToggleBtn
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+TabLayout.Padding = UDim.new(0, 4)
+TabLayout.Parent = TabBar
 
-local StatusRow = Instance.new("Frame")
-StatusRow.Size = UDim2.new(1, -20, 0, 24)
-StatusRow.Position = UDim2.new(0, 10, 0, 94)
-StatusRow.BackgroundTransparency = 1
-StatusRow.Parent = Main
+local Tabs = {}
+local ContentFrames = {}
 
-local StatusDot = Instance.new("Frame")
-StatusDot.Size = UDim2.new(0, 8, 0, 8)
-StatusDot.Position = UDim2.new(0, 2, 0.5, -4)
-StatusDot.BackgroundColor3 = THEME.Warn
-StatusDot.BorderSizePixel = 0
-StatusDot.Parent = StatusRow
-Instance.new("UICorner", StatusDot).CornerRadius = UDim.new(1, 0)
-
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, -18, 1, 0)
-StatusLabel.Position = UDim2.new(0, 18, 0, 0)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "جاهز"
-StatusLabel.TextColor3 = THEME.TextMain
-StatusLabel.TextSize = 12
-StatusLabel.Font = Enum.Font.GothamMedium
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.Parent = StatusRow
-
--- ✅ دالة تغيير الحالة (تم رفعها للأعلى لحل مشكلة زر البيع)
-local function SetStatus(text, color)
-    if StatusLabel then StatusLabel.Text = text end
-    if StatusDot and color then StatusDot.BackgroundColor3 = color end
-end
-
--- ==========================================
--- لوحة التعليمات
--- ==========================================
-InfoPanel = Instance.new("Frame")
-InfoPanel.Name = "InfoPanel"
-InfoPanel.Size = UDim2.new(1, -20, 0, 140)
-InfoPanel.Position = UDim2.new(0, 10, 0, 42)
-InfoPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
-InfoPanel.BorderSizePixel = 0
-InfoPanel.Visible = false
-InfoPanel.ZIndex = 20
-InfoPanel.Parent = Main
-Instance.new("UICorner", InfoPanel).CornerRadius = UDim.new(0, 10)
-
-local IPTitle = Instance.new("TextLabel")
-IPTitle.Size = UDim2.new(1, -40, 0, 20)
-IPTitle.Position = UDim2.new(0, 10, 0, 6)
-IPTitle.BackgroundTransparency = 1
-IPTitle.Text = "📌  التعليمات"
-IPTitle.TextColor3 = THEME.AccentLite
-IPTitle.TextSize = 12
-IPTitle.Font = Enum.Font.GothamBold
-IPTitle.TextXAlignment = Enum.TextXAlignment.Left
-IPTitle.ZIndex = 21
-IPTitle.Parent = InfoPanel
-
-local IPClose = Instance.new("TextButton")
-IPClose.Size = UDim2.new(0, 20, 0, 20)
-IPClose.Position = UDim2.new(1, -26, 0, 6)
-IPClose.BackgroundColor3 = THEME.Danger
-IPClose.Text = "X"
-IPClose.TextColor3 = Color3.new(1, 1, 1)
-IPClose.TextSize = 12
-IPClose.Font = Enum.Font.GothamBold
-IPClose.AutoButtonColor = false
-IPClose.ZIndex = 21
-IPClose.Parent = InfoPanel
-Instance.new("UICorner", IPClose).CornerRadius = UDim.new(1, 0)
-
-local IPBody = Instance.new("TextLabel")
-IPBody.Size = UDim2.new(1, -20, 0, 106)
-IPBody.Position = UDim2.new(0, 10, 0, 30)
-IPBody.BackgroundTransparency = 1
-IPBody.Text = "• يمسك الصنارة ويرمي تلقائياً\n• ينتظر الصيد حتى 150 ثانية\n• يتعامل مع لعبة الصيد تلقائياً\n• يعيد المحاولة عند الفشل\n• ⚙️ إعدادات: انتقال سريع + بيع ذكي وسريع"
-IPBody.TextColor3 = THEME.TextDim
-IPBody.TextSize = 11
-IPBody.Font = Enum.Font.Gotham
-IPBody.TextXAlignment = Enum.TextXAlignment.Left
-IPBody.TextYAlignment = Enum.TextYAlignment.Top
-IPBody.TextWrapped = true
-IPBody.ZIndex = 21
-IPBody.Parent = InfoPanel
-
--- ==========================================
--- لوحة الإعدادات
--- ==========================================
-SettingsPanel = Instance.new("Frame")
-SettingsPanel.Name = "SettingsPanel"
-SettingsPanel.Size = UDim2.new(1, -20, 0, 250)
-SettingsPanel.Position = UDim2.new(0, 10, 0, 42)
-SettingsPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
-SettingsPanel.BorderSizePixel = 0
-SettingsPanel.Visible = false
-SettingsPanel.ZIndex = 20
-SettingsPanel.ClipsDescendants = true
-SettingsPanel.Parent = Main
-Instance.new("UICorner", SettingsPanel).CornerRadius = UDim.new(0, 10)
-
-local SPTitle = Instance.new("TextLabel")
-SPTitle.Size = UDim2.new(1, -40, 0, 20)
-SPTitle.Position = UDim2.new(0, 10, 0, 6)
-SPTitle.BackgroundTransparency = 1
-SPTitle.Text = "⚙️  الإعدادات"
-SPTitle.TextColor3 = THEME.AccentLite
-SPTitle.TextSize = 12
-SPTitle.Font = Enum.Font.GothamBold
-SPTitle.TextXAlignment = Enum.TextXAlignment.Left
-SPTitle.ZIndex = 21
-SPTitle.Parent = SettingsPanel
-
-local SPClose = Instance.new("TextButton")
-SPClose.Size = UDim2.new(0, 20, 0, 20)
-SPClose.Position = UDim2.new(1, -26, 0, 6)
-SPClose.BackgroundColor3 = THEME.Danger
-SPClose.Text = "X"
-SPClose.TextColor3 = Color3.new(1, 1, 1)
-SPClose.TextSize = 12
-SPClose.Font = Enum.Font.GothamBold
-SPClose.AutoButtonColor = false
-SPClose.ZIndex = 21
-SPClose.Parent = SettingsPanel
-Instance.new("UICorner", SPClose).CornerRadius = UDim.new(1, 0)
-
-ScrollFrame = Instance.new("ScrollingFrame")
-ScrollFrame.Name = "ScrollFrame"
-ScrollFrame.Size = UDim2.new(1, -8, 1, -46)
-ScrollFrame.Position = UDim2.new(0, 4, 0, 34)
-ScrollFrame.BackgroundTransparency = 1
-ScrollFrame.BorderSizePixel = 0
-ScrollFrame.ScrollBarThickness = 4
-ScrollFrame.ScrollBarImageColor3 = THEME.Accent
-ScrollFrame.ScrollBarImageTransparency = 0.2
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-ScrollFrame.ScrollingDirection = Enum.ScrollingDirection.Y
-ScrollFrame.ZIndex = 22
-ScrollFrame.Parent = SettingsPanel
-
-local UIPaddingScroll = Instance.new("UIPadding")
-UIPaddingScroll.PaddingLeft = UDim.new(0, 4)
-UIPaddingScroll.PaddingRight = UDim.new(0, 4)
-UIPaddingScroll.PaddingTop = UDim.new(0, 4)
-UIPaddingScroll.Parent = ScrollFrame
-
-ScrollArrow = Instance.new("TextLabel")
-ScrollArrow.Name = "ScrollArrow"
-ScrollArrow.Size = UDim2.new(0, 20, 0, 20)
-ScrollArrow.Position = UDim2.new(1, -26, 1, -26)
-ScrollArrow.BackgroundTransparency = 1
-ScrollArrow.Text = "▼"
-ScrollArrow.TextColor3 = THEME.AccentLite
-ScrollArrow.TextSize = 18
-ScrollArrow.Font = Enum.Font.GothamBold
-ScrollArrow.ZIndex = 24
-ScrollArrow.Parent = SettingsPanel
-
-TweenService:Create(ScrollArrow, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-    Position = UDim2.new(1, -26, 1, -18)
-}):Play()
-
-ScrollFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-    local maxScroll = ScrollFrame.AbsoluteCanvasSize.Y - ScrollFrame.AbsoluteWindowSize.Y
-    if ScrollFrame.CanvasPosition.Y >= maxScroll - 10 then
-        ScrollArrow.Visible = false
-    else
-        ScrollArrow.Visible = true
-    end
-end)
-
-local function makeTPButton(locData, parent, pos, size)
+local function CreateTab(name, icon, title)
     local btn = Instance.new("TextButton")
-    btn.Size = size
-    btn.Position = pos
-    btn.BackgroundColor3 = Color3.fromRGB(0, 100, 180)
-    btn.Text = "🎣  " .. locData.name
-    btn.TextColor3 = THEME.TextMain
+    btn.Size = UDim2.new(0.2, -4, 1, -6)
+    btn.BackgroundColor3 = THEME.BgSoft
+    btn.BackgroundTransparency = 0.5
+    btn.Text = icon .. " " .. title
+    btn.TextColor3 = THEME.TextDim
     btn.TextSize = 10
     btn.Font = Enum.Font.GothamBold
     btn.AutoButtonColor = false
-    btn.ZIndex = 23
-    btn.Parent = parent
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-    btn.MouseButton1Click:Connect(function()
-        if TeleportToLocation then TeleportToLocation(locData.pos, locData.name) end
-        SettingsPanel.Visible = false
-        UpdateMainHeight()
-    end)
+    btn.Parent = TabBar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    
+    local cStroke = Instance.new("UIStroke", btn)
+    cStroke.Color = THEME.BgSoft
+    cStroke.Thickness = 1
+    cStroke.Transparency = 1
+    
+    Tabs[name] = {Btn = btn, Stroke = cStroke}
 end
 
-local function makeSectionHeader(text, parent, pos)
-    local header = Instance.new("TextLabel")
-    header.Size = UDim2.new(1, 0, 0, 20)
-    header.Position = pos
-    header.BackgroundTransparency = 1
-    header.Text = text
-    header.TextColor3 = THEME.AccentLite
-    header.TextSize = 11
-    header.Font = Enum.Font.GothamBold
-    header.TextXAlignment = Enum.TextXAlignment.Left
-    header.ZIndex = 23
-    header.Parent = parent
+CreateTab("Fishing", "🎣", "الصيد")
+CreateTab("Shop", "🛒", "البيع")
+CreateTab("Teleports", "📍", "الانتقالات")
+CreateTab("Stats", "📊", "إحصائيات")
+CreateTab("Info", "ℹ️", "تعليمات")
+
+ContentArea = Instance.new("Frame")
+ContentArea.Size = UDim2.new(1, -20, 1, -100)
+ContentArea.Position = UDim2.new(0, 10, 0, 96)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = Main
+
+local function SwitchTab(tabName)
+    for name, data in pairs(Tabs) do
+        if name == tabName then
+            TweenService:Create(data.Btn, TweenInfo.new(0.2), {BackgroundTransparency = 0, BackgroundColor3 = THEME.Accent}):Play()
+            data.Btn.TextColor3 = Color3.new(1,1,1)
+            data.Stroke.Transparency = 0
+            data.Stroke.Color = THEME.AccentGlow
+        else
+            TweenService:Create(data.Btn, TweenInfo.new(0.2), {BackgroundTransparency = 0.5, BackgroundColor3 = THEME.BgSoft}):Play()
+            data.Btn.TextColor3 = THEME.TextDim
+            data.Stroke.Transparency = 1
+        end
+    end
+    
+    for name, frame in pairs(ContentFrames) do
+        if name == tabName then
+            frame.Visible = true
+            frame.Position = UDim2.new(0, 0, 0, 5)
+            TweenService:Create(frame, TweenInfo.new(0.2), {Position = UDim2.new(0, 0, 0, 0)}):Play()
+        else
+            frame.Visible = false
+        end
+    end
+    CurrentTab = tabName
 end
 
--- ==========================================
--- 🔄 الترتيب: زر البيع أولاً
--- ==========================================
-local yPos = 0
+-- 1. تبويب الصيد
+local FishingTab = Instance.new("Frame")
+FishingTab.Size = UDim2.new(1, 0, 1, 0)
+FishingTab.BackgroundTransparency = 1
+FishingTab.Parent = ContentArea
+ContentFrames["Fishing"] = FishingTab
 
-makeSectionHeader("🛒  خيارات البيع", ScrollFrame, UDim2.new(0, 0, 0, yPos))
-yPos = yPos + 22
+ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(1, 0, 0, 60)
+ToggleBtn.Position = UDim2.new(0, 0, 0, 20)
+ToggleBtn.BackgroundColor3 = THEME.Success
+ToggleBtn.Text = "▶  بدء الصيد"
+ToggleBtn.TextColor3 = Color3.new(1,1,1)
+ToggleBtn.TextSize = 18
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.AutoButtonColor = false
+ToggleBtn.Parent = FishingTab
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 12)
+
+StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, 0, 0, 30)
+StatusLabel.Position = UDim2.new(0, 0, 0, 100)
+StatusLabel.BackgroundColor3 = THEME.BgGlass
+StatusLabel.BackgroundTransparency = 0.3
+StatusLabel.Text = "● جاهز"
+StatusLabel.TextColor3 = THEME.Success
+StatusLabel.TextSize = 13
+StatusLabel.Font = Enum.Font.GothamMedium
+StatusLabel.Parent = FishingTab
+Instance.new("UICorner", StatusLabel).CornerRadius = UDim.new(0, 8)
+
+-- 2. تبويب البيع
+local ShopTab = Instance.new("Frame")
+ShopTab.Size = UDim2.new(1, 0, 1, 0)
+ShopTab.BackgroundTransparency = 1
+ShopTab.Visible = false
+ShopTab.Parent = ContentArea
+ContentFrames["Shop"] = ShopTab
 
 local SellAllBtn = Instance.new("TextButton")
-SellAllBtn.Size = UDim2.new(1, 0, 0, 36)
-SellAllBtn.Position = UDim2.new(0, 0, 0, yPos)
-SellAllBtn.BackgroundColor3 = THEME.Success
-SellAllBtn.Text = "💰 بيع جميع السمك"
+SellAllBtn.Size = UDim2.new(1, 0, 0, 60)
+SellAllBtn.Position = UDim2.new(0, 0, 0, 20)
+SellAllBtn.BackgroundColor3 = THEME.Accent
+SellAllBtn.Text = "💰 بيع جميع السمك (يدوي)"
 SellAllBtn.TextColor3 = Color3.new(1,1,1)
-SellAllBtn.TextSize = 12
 SellAllBtn.Font = Enum.Font.GothamBold
+SellAllBtn.TextSize = 16
 SellAllBtn.AutoButtonColor = false
-SellAllBtn.ZIndex = 23
-SellAllBtn.Parent = ScrollFrame
-Instance.new("UICorner", SellAllBtn).CornerRadius = UDim.new(0, 6)
+SellAllBtn.Parent = ShopTab
+Instance.new("UICorner", SellAllBtn).CornerRadius = UDim.new(0, 12)
 
-yPos = yPos + 46
+local AutoSellFrame = Instance.new("Frame")
+AutoSellFrame.Size = UDim2.new(1, 0, 0, 60)
+AutoSellFrame.Position = UDim2.new(0, 0, 0, 95)
+AutoSellFrame.BackgroundColor3 = THEME.BgGlass
+AutoSellFrame.BackgroundTransparency = 0.3
+AutoSellFrame.Parent = ShopTab
+Instance.new("UICorner", AutoSellFrame).CornerRadius = UDim.new(0, 12)
 
-makeSectionHeader("🎣  صيد السمك", ScrollFrame, UDim2.new(0, 0, 0, yPos))
-yPos = yPos + 22
-for i, loc in ipairs(FISHING_LOCATIONS) do
-    local row = math.floor((i - 1) / 2)
-    local col = (i - 1) % 2
-    makeTPButton(loc, ScrollFrame, UDim2.new(col * 0.5, col * 4, 0, yPos + row * 36), UDim2.new(0.5, -4, 0, 32))
+local AutoSellText = Instance.new("TextLabel")
+AutoSellText.Size = UDim2.new(1, -70, 1, 0)
+AutoSellText.Position = UDim2.new(0, 15, 0, 0)
+AutoSellText.BackgroundTransparency = 1
+AutoSellText.Text = "البيع التلقائي (كل 10 دقائق)"
+AutoSellText.TextColor3 = THEME.TextMain
+AutoSellText.Font = Enum.Font.GothamBold
+AutoSellText.TextSize = 13
+AutoSellText.TextXAlignment = Enum.TextXAlignment.Left
+AutoSellText.Parent = AutoSellFrame
+
+AutoSellSwitch = Instance.new("TextButton")
+AutoSellSwitch.Size = UDim2.new(0, 44, 0, 24)
+AutoSellSwitch.Position = UDim2.new(1, -55, 0.5, -12)
+AutoSellSwitch.BackgroundColor3 = THEME.BgSoft
+AutoSellSwitch.Text = ""
+AutoSellSwitch.AutoButtonColor = false
+AutoSellSwitch.Parent = AutoSellFrame
+Instance.new("UICorner", AutoSellSwitch).CornerRadius = UDim.new(1, 0)
+
+SwitchDot = Instance.new("Frame")
+SwitchDot.Size = UDim2.new(0, 20, 0, 20)
+SwitchDot.Position = UDim2.new(0, 2, 0.5, -10)
+SwitchDot.BackgroundColor3 = THEME.TextDim
+SwitchDot.Parent = AutoSellSwitch
+Instance.new("UICorner", SwitchDot).CornerRadius = UDim.new(1, 0)
+
+-- 3. تبويب الانتقالات
+local TeleportsTab = Instance.new("Frame")
+TeleportsTab.Size = UDim2.new(1, 0, 1, 0)
+TeleportsTab.BackgroundTransparency = 1
+TeleportsTab.Visible = false
+TeleportsTab.Parent = ContentArea
+ContentFrames["Teleports"] = TeleportsTab
+
+local TPFrame = Instance.new("Frame")
+TPFrame.Size = UDim2.new(1, 0, 1, 0)
+TPFrame.BackgroundColor3 = THEME.BgGlass
+TPFrame.BackgroundTransparency = 0.5
+TPFrame.Parent = TeleportsTab
+Instance.new("UICorner", TPFrame).CornerRadius = UDim.new(0, 10)
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Size = UDim2.new(1, -10, 1, -10)
+Scroll.Position = UDim2.new(0, 5, 0, 5)
+Scroll.BackgroundTransparency = 1
+Scroll.ScrollBarThickness = 2
+Scroll.ScrollBarImageColor3 = THEME.Accent
+Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+Scroll.Parent = TPFrame
+
+local UIList = Instance.new("UIListLayout")
+UIList.Padding = UDim.new(0, 5)
+UIList.Parent = Scroll
+
+local function AddTPBtn(loc)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, 0, 0, 34)
+    b.BackgroundColor3 = THEME.BgSoft
+    b.Text = "📍 " .. loc.name
+    b.TextColor3 = THEME.TextMain
+    b.Font = Enum.Font.GothamMedium
+    b.TextSize = 12
+    b.Parent = Scroll
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    b.MouseButton1Click:Connect(function()
+        if TeleportToLocation then TeleportToLocation(loc.pos, loc.name) end
+    end)
 end
-yPos = yPos + math.ceil(#FISHING_LOCATIONS / 2) * 36 + 6
 
-makeSectionHeader("💰  بيع السمك (مواقع)", ScrollFrame, UDim2.new(0, 0, 0, yPos))
-yPos = yPos + 22
-for i, loc in ipairs(SELLING_LOCATIONS) do
-    local row = math.floor((i - 1) / 2)
-    local col = (i - 1) % 2
-    makeTPButton(loc, ScrollFrame, UDim2.new(col * 0.5, col * 4, 0, yPos + row * 36), UDim2.new(0.5, -4, 0, 32))
+local fH = Instance.new("TextLabel")
+fH.Size = UDim2.new(1, 0, 0, 20)
+fH.Text = "مواقع الصيد"
+fH.BackgroundTransparency = 1
+fH.TextColor3 = THEME.AccentGlow
+fH.Font = Enum.Font.GothamBold
+fH.TextSize = 11
+fH.Parent = Scroll
+for i, loc in ipairs(FISHING_LOCATIONS) do AddTPBtn(loc) end
+
+local sH = Instance.new("TextLabel")
+sH.Size = UDim2.new(1, 0, 0, 20)
+sH.Text = "مواقع البيع"
+sH.BackgroundTransparency = 1
+sH.TextColor3 = THEME.AccentGlow
+sH.Font = Enum.Font.GothamBold
+sH.TextSize = 11
+sH.Parent = Scroll
+for i, loc in ipairs(SELLING_LOCATIONS) do AddTPBtn(loc) end
+
+Scroll.CanvasSize = UDim2.new(0, 0, 0, #FISHING_LOCATIONS * 39 + #SELLING_LOCATIONS * 39 + 50)
+
+-- 4. تبويب الإحصائيات
+local StatsTab = Instance.new("Frame")
+StatsTab.Size = UDim2.new(1, 0, 1, 0)
+StatsTab.BackgroundTransparency = 1
+StatsTab.Visible = false
+StatsTab.Parent = ContentArea
+ContentFrames["Stats"] = StatsTab
+
+local function createStatCard(icon, text, yPos)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 45)
+    card.Position = UDim2.new(0, 0, 0, yPos)
+    card.BackgroundColor3 = THEME.BgGlass
+    card.BackgroundTransparency = 0.3
+    card.Parent = StatsTab
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+    
+    local iLbl = Instance.new("TextLabel")
+    iLbl.Size = UDim2.new(0, 40, 1, 0)
+    iLbl.BackgroundTransparency = 1
+    iLbl.Text = icon
+    iLbl.TextSize = 20
+    iLbl.Parent = card
+    
+    local tLbl = Instance.new("TextLabel")
+    tLbl.Size = UDim2.new(1, -50, 1, 0)
+    tLbl.Position = UDim2.new(0, 45, 0, 0)
+    tLbl.BackgroundTransparency = 1
+    tLbl.Text = text
+    tLbl.TextColor3 = THEME.TextMain
+    tLbl.Font = Enum.Font.GothamBold
+    tLbl.TextSize = 13
+    tLbl.TextXAlignment = Enum.TextXAlignment.Left
+    tLbl.Parent = card
+    return tLbl
 end
-yPos = yPos + math.ceil(#SELLING_LOCATIONS / 2) * 36 + 10
 
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, yPos)
+StatCaught = createStatCard("🐟", "الأسماك: 0", 10)
+StatTime = createStatCard("⏱️", "الوقت: 00:00:00", 65)
+StatStatus = createStatCard("⚙️", "جاهز", 120)
+
+-- 5. تبويب التعليمات
+local InfoTab = Instance.new("Frame")
+InfoTab.Size = UDim2.new(1, 0, 1, 0)
+InfoTab.BackgroundTransparency = 1
+InfoTab.Visible = false
+InfoTab.Parent = ContentArea
+ContentFrames["Info"] = InfoTab
+
+local InfoLbl = Instance.new("TextLabel")
+InfoLbl.Size = UDim2.new(1, 0, 1, 0)
+InfoLbl.BackgroundColor3 = THEME.BgGlass
+InfoLbl.BackgroundTransparency = 0.5
+InfoLbl.Text = "\n• يمسك الصنارة ويرمي تلقائياً\n\n• ينتظر الصيد ويتعامل مع اللعبة\n\n• يعيد المحاولة عند الفشل\n\n• نظام بيع ذكي وتلقائي\n\n• تبويب انتقالات لسهولة التنقل"
+InfoLbl.TextColor3 = THEME.TextDim
+InfoLbl.Font = Enum.Font.GothamMedium
+InfoLbl.TextSize = 13
+InfoLbl.TextYAlignment = Enum.TextYAlignment.Top
+InfoLbl.Parent = InfoTab
+Instance.new("UICorner", InfoLbl).CornerRadius = UDim.new(0, 10)
+
+for name, data in pairs(Tabs) do
+    data.Btn.MouseButton1Click:Connect(function() SwitchTab(name) end)
+end
+SwitchTab("Fishing")
 
 -- ==========================================
--- 🛒 دالة البيع السريعة (مع إمكانية الإيقاف)
+-- 🔥 دوال التحكم بالزر العائم (مُحسنة)
 -- ==========================================
-SellAllBtn.MouseButton1Click:Connect(function()
-    if isSelling then
-        isSelling = false
-        SellAllBtn.Text = "⏳ جاري الإيقاف..."
-        SellAllBtn.BackgroundColor3 = THEME.DangerLt
-        return
+local function ToggleMainUI()
+    Main.Visible = not Main.Visible
+    if Main.Visible then
+        -- إرجاع الحجم الصحيح سواء كان مصغر أو لا
+        local targetHeight = isMinimized and MAIN_MIN_HEIGHT or MAIN_HEIGHT
+        Main.Size = UDim2.new(0, MAIN_WIDTH * 0.8, 0, targetHeight * 0.8)
+        TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, MAIN_WIDTH, 0, targetHeight)}):Play()
+        
+        -- التأكد من ظهور التبويبات لو كان مصغر
+        if not isMinimized then
+            TabBar.Visible = true
+            ContentArea.Visible = true
+        end
     end
+end
 
-    if not Remotes.InventoryAction then
-        SetStatus("خطأ: لم يتم العثور على ريموت البيع", THEME.Danger)
-        return
+HideBtn.MouseButton1Click:Connect(ToggleMainUI)
+
+-- 🟢 كود السحب (Drag System) للزر العائم
+local draggingFAB = false
+local dragStartFAB = nil
+local startPosFAB = nil
+local hasDraggedFAB = false
+local dragThreshold = 10
+
+FloatBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingFAB = true
+        hasDraggedFAB = false
+        dragStartFAB = input.Position
+        startPosFAB = FloatBtn.Position
     end
+end)
 
-    isSelling = true
-    SellAllBtn.Text = "⏹️ إيقاف البيع"
-    SellAllBtn.BackgroundColor3 = THEME.Danger
-    SetStatus("جاري بيع جميع السمك بسرعة...", THEME.Warn)
+UserInputService.InputChanged:Connect(function(input)
+    if draggingFAB and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStartFAB
+        if not hasDraggedFAB and (math.abs(delta.X) > dragThreshold or math.abs(delta.Y) > dragThreshold) then
+            hasDraggedFAB = true
+        end
+        if hasDraggedFAB then
+            FloatBtn.Position = UDim2.new(
+                startPosFAB.X.Scale, startPosFAB.X.Offset + delta.X, 
+                startPosFAB.Y.Scale, startPosFAB.Y.Offset + delta.Y
+            )
+        end
+    end
+end)
 
-    task.spawn(function()
-        for loop = 1, 3 do
-            if not isSelling then break end
-            for i, fishName in ipairs(FISH_NAMES) do
-                if not isSelling then break end
-                pcall(function()
-                    Remotes.InventoryAction:FireServer({
-                        amount = 99,
-                        action = "sell",
-                        fishId = "Glaciers/" .. fishName
-                    })
-                end)
-                task.wait(0.1) 
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if draggingFAB then
+            draggingFAB = false
+            if not hasDraggedFAB then
+                ToggleMainUI()
             end
         end
+    end
+end)
 
-        if isSelling then
-            SellAllBtn.Text = "✅ تم البيع بنجاح!"
-            SellAllBtn.BackgroundColor3 = THEME.SuccessLt
-            SetStatus("تم بيع جميع السمك!", THEME.Success)
-            task.wait(2)
-        end
+-- تصغير النافذة
+MinimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        MinimizeBtn.Text = "➕"
+        TabBar.Visible = false
+        ContentArea.Visible = false
+        TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_MIN_HEIGHT)}):Play()
+    else
+        MinimizeBtn.Text = "➖"
+        TabBar.Visible = true
+        ContentArea.Visible = true
+        TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_HEIGHT)}):Play()
+    end
+end)
 
-        isSelling = false
-        SellAllBtn.Text = "💰 بيع جميع السمك"
-        SellAllBtn.BackgroundColor3 = THEME.Success
-        if StatusLabel.Text == "جاري بيع جميع السمك بسرعة..." then
-            SetStatus("جاهز", THEME.TextDim)
+-- سحب النافذة الرئيسية
+local dragging, dragInput, dragStart, startPos
+TitleRow.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = Main.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+TitleRow.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- 🟢 نظام الحماية عند العودة للعبة أو الموت
+localPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    if ScreenGui and ScreenGui.Parent then
+        Main.Visible = true
+        FloatBtn.Visible = true
+        SwitchTab(CurrentTab) -- إعادة تحميل التبويب الحالي
+        if isMinimized then
+            Main.Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_MIN_HEIGHT)
+            TabBar.Visible = false
+            ContentArea.Visible = false
+        else
+            Main.Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_HEIGHT)
+            TabBar.Visible = true
+            ContentArea.Visible = true
         end
+    end
+end)
+
+-- ==========================================
+-- دوال البيع والصيد
+-- ==========================================
+local function PerformSell()
+    if not Remotes.InventoryAction then return end
+    SetStatus("جاري البيع...", THEME.AccentGlow)
+    for loop = 1, 3 do
+        for i, fishName in ipairs(FISH_NAMES) do
+            pcall(function()
+                Remotes.InventoryAction:FireServer({amount = 99, action = "sell", fishId = "Glaciers/" .. fishName})
+            end)
+            task.wait(0.08) 
+        end
+    end
+    SetStatus("تم البيع!", THEME.Success)
+end
+
+SellAllBtn.MouseButton1Click:Connect(function()
+    SellAllBtn.Text = "⏳ جاري البيع..."
+    task.spawn(function()
+        PerformSell()
+        SellAllBtn.Text = "💰 بيع جميع السمك (يدوي)"
+        if isRunning then SetStatus("عودة للصيد...", THEME.Success) else SetStatus("جاهز", THEME.Success) end
     end)
 end)
 
--- ==========================================
--- تغيير الارتفاع والتحكم
--- ==========================================
-function UpdateMainHeight()
-    if isMinimized then return end
-    local target = GetTargetHeight()
-    TweenService:Create(Main, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, MAIN_WIDTH, 0, target)
-    }):Play()
-end
-
-SettingsBtn.MouseButton1Click:Connect(function()
-    local wasOpen = SettingsPanel.Visible
-    SettingsPanel.Visible = not wasOpen
-    InfoPanel.Visible = false
-    UpdateMainHeight()
-end)
-InfoBtn.MouseButton1Click:Connect(function()
-    local wasOpen = InfoPanel.Visible
-    InfoPanel.Visible = not wasOpen
-    SettingsPanel.Visible = false
-    UpdateMainHeight()
-end)
-SPClose.MouseButton1Click:Connect(function() SettingsPanel.Visible = false; UpdateMainHeight() end)
-IPClose.MouseButton1Click:Connect(function() InfoPanel.Visible = false; UpdateMainHeight() end)
-
-UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    local pos = input.Position
-    local function isInside(g)
-        if not g or not g.Visible then return false end
-        local a, s = g.AbsolutePosition, g.AbsoluteSize
-        return pos.X >= a.X and pos.X <= a.X + s.X and pos.Y >= a.Y and pos.Y <= a.Y + s.Y
+AutoSellSwitch.MouseButton1Click:Connect(function()
+    isAutoSell = not isAutoSell
+    if isAutoSell then
+        TweenService:Create(AutoSellSwitch, TweenInfo.new(0.2), {BackgroundColor3 = THEME.Success}):Play()
+        TweenService:Create(SwitchDot, TweenInfo.new(0.2), {Position = UDim2.new(1, -22, 0.5, -10), BackgroundColor3 = Color3.new(1,1,1)}):Play()
+        lastAutoSellTime = tick()
+    else
+        TweenService:Create(AutoSellSwitch, TweenInfo.new(0.2), {BackgroundColor3 = THEME.BgSoft}):Play()
+        TweenService:Create(SwitchDot, TweenInfo.new(0.2), {Position = UDim2.new(0, 2, 0.5, -10), BackgroundColor3 = THEME.TextDim}):Play()
     end
-    local changed = false
-    if SettingsPanel.Visible and not isInside(SettingsPanel) and not isInside(SettingsBtn) then SettingsPanel.Visible = false; changed = true end
-    if InfoPanel.Visible and not isInside(InfoPanel) and not isInside(InfoBtn) then InfoPanel.Visible = false; changed = true end
-    if changed then UpdateMainHeight() end
 end)
 
--- ==========================================
--- نافذة الانتظار والصيد (تم تحسين شكلها)
--- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if isAutoSell and isRunning then
+            if (tick() - lastAutoSellTime) >= CONFIG.AUTO_SELL_INTERVAL then
+                lastAutoSellTime = tick()
+                PerformSell()
+            end
+        else
+            lastAutoSellTime = tick()
+        end
+    end
+end)
+
+-- نافذة الانتظار
 local WaitOverlay = Instance.new("Frame")
-WaitOverlay.Name = "WaitOverlay"
-WaitOverlay.Size = UDim2.new(0, 240, 0, 150)
-WaitOverlay.Position = UDim2.new(0.5, -120, 0.5, -75)
-WaitOverlay.BackgroundColor3 = THEME.BgMid
-WaitOverlay.BorderSizePixel = 0
-WaitOverlay.ClipsDescendants = true
+WaitOverlay.Size = UDim2.new(0, 200, 0, 130)
+WaitOverlay.Position = UDim2.new(0.5, -100, 0.5, -65)
+WaitOverlay.BackgroundColor3 = THEME.BgMain
+WaitOverlay.BackgroundTransparency = 0.1
 WaitOverlay.Visible = false
 WaitOverlay.ZIndex = 50
 WaitOverlay.Parent = ScreenGui
 Instance.new("UICorner", WaitOverlay).CornerRadius = UDim.new(0, 16)
-
--- إضافة التدرج اللوني والحدود المضيئة عشان تشبه الواجهة الأساسية
-local WaitGrad = Instance.new("UIGradient")
-WaitGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 16)), ColorSequenceKeypoint.new(0.6, Color3.fromRGB(16, 16, 26)), ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 36))}
-WaitGrad.Rotation = 115
-WaitGrad.Parent = WaitOverlay
-
-local WaitStroke = Instance.new("UIStroke", WaitOverlay)
-WaitStroke.Color = THEME.Accent
-WaitStroke.Thickness = 1.8
-WaitStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-TweenService:Create(WaitStroke, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = THEME.AccentLite}):Play()
-
-local WaitScale = Instance.new("UIScale")
-WaitScale.Scale = 1
-WaitScale.Parent = WaitOverlay
+local WOStroke = Instance.new("UIStroke", WaitOverlay)
+WOStroke.Color = THEME.AccentGlow
+WOStroke.Thickness = 2
+TweenService:Create(WOStroke, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.5}):Play()
 
 local WaitTitle = Instance.new("TextLabel")
-WaitTitle.Size = UDim2.new(1, 0, 0, 28)
-WaitTitle.Position = UDim2.new(0, 0, 0, 16)
+WaitTitle.Size = UDim2.new(1, 0, 0, 30)
+WaitTitle.Position = UDim2.new(0, 0, 0, 15)
 WaitTitle.BackgroundTransparency = 1
-WaitTitle.Text = "⏳  انتظر 4 ثوانٍ"
-WaitTitle.TextColor3 = THEME.AccentLite
-WaitTitle.TextSize = 16
+WaitTitle.Text = "جاري الصيد..."
+WaitTitle.TextColor3 = THEME.AccentGlow
 WaitTitle.Font = Enum.Font.GothamBold
+WaitTitle.TextSize = 14
 WaitTitle.ZIndex = 51
 WaitTitle.Parent = WaitOverlay
 
 local WaitCount = Instance.new("TextLabel")
-WaitCount.Size = UDim2.new(1, 0, 0, 90)
-WaitCount.Position = UDim2.new(0, 0, 0, 48)
+WaitCount.Size = UDim2.new(1, 0, 0, 70)
+WaitCount.Position = UDim2.new(0, 0, 0, 40)
 WaitCount.BackgroundTransparency = 1
 WaitCount.Text = "4"
-WaitCount.TextColor3 = THEME.Warn
-WaitCount.TextSize = 64
+WaitCount.TextColor3 = THEME.TextMain
+WaitCount.TextSize = 50
 WaitCount.Font = Enum.Font.GothamBlack
 WaitCount.ZIndex = 51
 WaitCount.Parent = WaitOverlay
 
-local WaitSub = Instance.new("TextLabel")
-WaitSub.Size = UDim2.new(1, 0, 0, 18)
-WaitSub.Position = UDim2.new(0, 0, 1, -26)
-WaitSub.BackgroundTransparency = 1
-WaitSub.Text = "جارٍ تجهيز اللعبة..."
-WaitSub.TextColor3 = THEME.TextDim
-WaitSub.TextSize = 11
-WaitSub.Font = Enum.Font.Gotham
-WaitSub.ZIndex = 51
-WaitSub.Parent = WaitOverlay
-
-local function UpdateScales()
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    local vp = cam.ViewportSize
-    MainScale.Scale = math.clamp(math.min(1, (vp.X * 0.9) / MAIN_WIDTH), 0.55, 1)
-    WaitScale.Scale = math.clamp(math.min(1, (vp.X * 0.9) / 240), 0.7, 1)
-end
-if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateScales) end
-UpdateScales()
-
-local function MakeDraggable(frame, dragHandle)
-    dragHandle = dragHandle or frame
-    local dragging, dragInput, dragStart, startPos
-    dragHandle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
-        end
-    end)
-    dragHandle.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-end
-MakeDraggable(FloatBtn)
-MakeDraggable(Main, TitleRow)
-
-local visBusy = false
-local function AnimateShow()
-    visBusy = true
-    Main.Visible = true
-    local targetH = GetTargetHeight()
-    Main.Size = UDim2.new(0, MAIN_WIDTH * 0.85, 0, targetH * 0.85)
-    local t = TweenService:Create(Main, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.new(0, MAIN_WIDTH, 0, targetH) })
-    t:Play()
-    t.Completed:Wait()
-    visBusy = false
-end
-local function AnimateHide()
-    visBusy = true
-    local curH = Main.AbsoluteSize.Y / MainScale.Scale
-    local t = TweenService:Create(Main, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = UDim2.new(0, MAIN_WIDTH * 0.85, 0, curH * 0.85) })
-    t:Play()
-    t.Completed:Wait()
-    Main.Visible = false
-    Main.Size = UDim2.new(0, MAIN_WIDTH, 0, curH)
-    visBusy = false
-end
-
-FloatBtn.MouseButton1Click:Connect(function()
-    if visBusy then return end
-    if Main.Visible then AnimateHide() else AnimateShow() end
-end)
-
-MinimizeBtn.MouseButton1Click:Connect(function()
-    if isMinimized then
-        isMinimized = false
-        MinimizeBtn.Text = "➖"
-        local target = GetTargetHeight()
-        TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, MAIN_WIDTH, 0, target) }):Play()
-    else
-        isMinimized = true
-        MinimizeBtn.Text = "➕"
-        SettingsPanel.Visible = false
-        InfoPanel.Visible = false
-        TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_MIN_HEIGHT) }):Play()
-    end
-end)
-
-localPlayer.Idled:Connect(function()
-    pcall(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new(0, 0))
-    end)
-end)
-
 local function IsFailureStatus(s)
     if type(s) ~= "string" then return false end
     local l = string.lower(s)
-    return string.find(l, "fail") or string.find(l, "cancel") or string.find(l, "lost") or string.find(l, "error") or string.find(l, "escape")
+    return string.find(l, "fail") or string.find(l, "cancel") or string.find(l, "lost") or string.find(l, "error")
 end
 
 local function IsToolValid(tool)
@@ -768,106 +737,39 @@ local function ForceToolReset()
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
     pcall(function() hum:UnequipTools() end)
-    task.wait(CONFIG.TOOL_RESET_WAIT)
+    task.wait(0.6)
     return EquipRod()
 end
 
-local waitVisGen = 0
-local function ShowWaitOverlay()
-    waitVisGen = waitVisGen + 1
-    WaitOverlay.Visible = true
-    WaitOverlay.Size = UDim2.new(0, 240 * 0.85, 0, 150 * 0.85)
-    WaitOverlay.Position = UDim2.new(0.5, -240 * 0.425, 0.5, -150 * 0.425)
-    TweenService:Create(WaitOverlay, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 240, 0, 150),
-        Position = UDim2.new(0.5, -120, 0.5, -75)
-    }):Play()
-end
-
-local function HideWaitOverlay()
-    waitVisGen = waitVisGen + 1
-    local myGen = waitVisGen
-    TweenService:Create(WaitOverlay, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-        Size = UDim2.new(0, 240 * 0.85, 0, 150 * 0.85),
-        Position = UDim2.new(0.5, -240 * 0.425, 0.5, -150 * 0.425)
-    }):Play()
-    task.delay(CONFIG.HIDE_FALLBACK_DELAY, function()
-        if waitVisGen == myGen then
-            WaitOverlay.Visible = false
-            WaitOverlay.Size = UDim2.new(0, 240, 0, 150)
-            WaitOverlay.Position = UDim2.new(0.5, -120, 0.5, -75)
-        end
-    end)
-end
-
-local overlayVisibleSince = 0
-RunService.Heartbeat:Connect(function()
-    if WaitOverlay.Visible then
-        if overlayVisibleSince == 0 then overlayVisibleSince = tick()
-        elseif tick() - overlayVisibleSince > CONFIG.WATCHDOG_TIMEOUT then
-            waitVisGen = waitVisGen + 1
-            WaitOverlay.Visible = false
-            overlayVisibleSince = 0
-        end
-    else
-        overlayVisibleSince = 0
-    end
-end)
-
-local waitGeneration = 0
-local processedGuids = {}
-local processedQueue = {}
-
-local function MarkGuidProcessed(guid)
-    if processedGuids[guid] then return end
-    processedGuids[guid] = true
-    table.insert(processedQueue, guid)
-    if #processedQueue > 20 then processedGuids[table.remove(processedQueue, 1)] = nil end
-end
-
-local function CancelWait()
-    waitGeneration = waitGeneration + 1
-    HideWaitOverlay()
-    CurrentGUID = nil
-end
-
-local function ShowWaitAndComplete(guid)
-    local myGuid = tostring(guid)
-    if processedGuids[myGuid] then return end
-    local myGen = waitGeneration + 1
-    waitGeneration = myGen
-    CurrentGUID = myGuid
-    ShowWaitOverlay()
-    WaitTitle.Text = "⏳  انتظر 4 ثوانٍ"
-    WaitCount.Text = "4"
-    WaitSub.Text = "جارٍ تجهيز اللعبة..."
-    SetStatus("لعبة صيد — انتظار...", THEME.Warn)
-    task.spawn(function()
-        for i = 4, 1, -1 do
-            if waitGeneration ~= myGen or not isRunning then
-                if waitGeneration == myGen then HideWaitOverlay() end
-                return
-            end
-            WaitCount.Text = tostring(i)
-            task.wait(1)
-        end
-        if waitGeneration ~= myGen or not isRunning then
-            if waitGeneration == myGen then HideWaitOverlay() end
-            return
-        end
-        SetStatus("إنهاء اللعبة المصغرة...", THEME.AccentLite)
-        local ok = pcall(function() Remotes.MinigameAction:FireServer("Complete", myGuid) end)
-        if ok then MarkGuidProcessed(myGuid) end
-        HideWaitOverlay()
-    end)
+function TeleportToLocation(pos, locName)
+    local char = localPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    isRunning = false
+    ToggleBtn.Text = "▶  بدء الصيد"
+    TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.Success}):Play()
+    hrp.CFrame = CFrame.new(pos)
+    SetStatus("✅ تم الانتقال: " .. locName, THEME.Success)
 end
 
 if Remotes.MinigameCommand then
     Remotes.MinigameCommand.OnClientEvent:Connect(function(cmd, guid)
         if cmd == "Start" and guid and isRunning then
             local g = tostring(guid)
-            if (WaitOverlay.Visible and CurrentGUID == g) or processedGuids[g] then return end
-            ShowWaitAndComplete(g)
+            waitGeneration = waitGeneration + 1
+            local myGen = waitGeneration
+            WaitOverlay.Visible = true
+            WaitCount.Text = "4"
+            task.spawn(function()
+                for i = 4, 1, -1 do
+                    if waitGeneration ~= myGen or not isRunning then return end
+                    WaitCount.Text = tostring(i)
+                    task.wait(1)
+                end
+                if waitGeneration ~= myGen or not isRunning then return end
+                pcall(function() Remotes.MinigameAction:FireServer("Complete", g) end)
+                WaitOverlay.Visible = false
+            end)
         end
     end)
 end
@@ -875,118 +777,64 @@ end
 if Remotes.Status then
     Remotes.Status.OnClientEvent:Connect(function(status)
         local newStatus = type(status) == "string" and status or (type(status) == "table" and (status.status or status.Status))
-        if type(newStatus) == "string" then
-            LastStatus = newStatus
-            statusVersion = statusVersion + 1
-        end
+        if type(newStatus) == "string" then LastStatus = newStatus; statusVersion = statusVersion + 1 end
     end)
 end
 
-local function StopScriptForTeleport()
-    if not isRunning then return end
-    isRunning = false
-    ToggleBtn.Text = "▶️  تشغيل"
-    ToggleBtn.BackgroundColor3 = THEME.Success
-    ToggleGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 180, 90)), ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 230, 140))}
-    SetStatus("متوقف (انتقال)", THEME.TextDim)
-    CancelWait()
-end
-
-function TeleportToLocation(pos, locName)
-    local char = localPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then SetStatus("تعذّر الانتقال", THEME.Danger); return end
-    StopScriptForTeleport()
-    hrp.CFrame = CFrame.new(pos)
-    SetStatus("✅ تم الانتقال إلى " .. locName, THEME.Success)
-end
-
 local function RunOneAttempt(myLoopId)
-    currentAttemptId = currentAttemptId + 1
-    attemptStartTick = tick()
-    CancelWait()
+    waitGeneration = waitGeneration + 1
+    WaitOverlay.Visible = false
     local castStartVersion = statusVersion
-
-    SetStatus("تجهيز الصنارة...", THEME.AccentLite)
-    if not EquipRod() then
-        SetStatus("تعذّر تجهيز الصنارة", THEME.Danger)
-        return "equip_failed"
-    end
+    
+    SetStatus("تجهيز...", THEME.TextDim)
+    if not EquipRod() then return "equip_failed" end
     if not isRunning or autoFishLoopId ~= myLoopId then return "cancelled" end
 
     local char = localPlayer.Character
     local tool = char and char:FindFirstChildOfClass("Tool")
-    if not IsToolValid(tool) then SetStatus("تعذّر تجهيز الصنارة", THEME.Danger); return "equip_failed" end
+    if not IsToolValid(tool) then return "equip_failed" end
 
     pcall(function() tool:Deactivate() end)
     task.wait(0.3)
-    SetStatus("رمي الصنارة...", THEME.AccentLite)
+    SetStatus("رمي...", THEME.AccentGlow)
     pcall(function() tool:Activate() end)
     task.wait(CONFIG.CAST_DEACTIVATE_WAIT)
     pcall(function() if tool and tool.Parent then tool:Deactivate() end end)
 
     local castStart = tick()
-    local castOk, castFailReason, castFailStatus = false, nil, nil
-    local toolLostAt = nil
-
+    local castOk = false
     while isRunning and autoFishLoopId == myLoopId do
-        local c = localPlayer.Character
-        if not c then castFailReason = "character_lost"; break end
-        if tick() - castStart > CONFIG.CAST_TIMEOUT then castFailReason = "cast_timeout"; break end
-        local eq = c:FindFirstChildOfClass("Tool")
-        if not eq then
-            if not toolLostAt then toolLostAt = tick() end
-            if tick() - toolLostAt > CONFIG.TOOL_LOST_GRACE then castFailReason = "tool_lost_during_cast"; break end
-        else toolLostAt = nil end
-        
+        if tick() - castStart > CONFIG.CAST_TIMEOUT then break end
         if statusVersion > castStartVersion then
-            local curStatus = LastStatus
-            castStartVersion = statusVersion
-            if curStatus == "Searching" or curStatus == "LongWaitStart" then castOk = true; break
-            elseif IsFailureStatus(curStatus) then castFailReason = "cast_status_fail"; castFailStatus = curStatus; break end
+            if LastStatus == "Searching" or LastStatus == "LongWaitStart" then castOk = true; break
+            elseif IsFailureStatus(LastStatus) then break end
         end
         task.wait(0.1)
     end
 
-    if not castOk then
-        SetStatus(GetUserFailureMessage(castFailStatus, castFailReason), THEME.Danger)
-        pcall(function() local c2 = localPlayer.Character; local t2 = c2 and c2:FindFirstChildOfClass("Tool"); if t2 then t2:Deactivate() end end)
-        if not (isRunning and autoFishLoopId == myLoopId) then return "cancelled" end
-        ForceToolReset()
-        return "cast_failed"
-    end
+    if not castOk then ForceToolReset(); return "cast_failed" end
 
-    SetStatus("في انتظار السمكة...", THEME.AccentLite)
+    SetStatus("انتظار السمكة...", THEME.AccentGlow)
     local fishStartVersion = statusVersion
     local fishStart = tick()
-    local success, failReason = false, nil
+    local success = false
 
     while isRunning and autoFishLoopId == myLoopId do
-        local c = localPlayer.Character
-        local eq = c and c:FindFirstChildOfClass("Tool")
-        local bp = localPlayer:FindFirstChild("Backpack")
-        local bpTool = bp and bp:FindFirstChildWhichIsA("Tool")
-        if not eq and not bpTool then failReason = "tool_deleted"; break end
-        
         if statusVersion > fishStartVersion then
-            local curStatus = LastStatus
-            fishStartVersion = statusVersion
-            if curStatus == "Caught" then success = true; break
-            elseif IsFailureStatus(curStatus) then failReason = "fish_status_fail:" .. tostring(curStatus); break end
+            if LastStatus == "Caught" then success = true; break
+            elseif IsFailureStatus(LastStatus) then break end
         end
-        if tick() - fishStart > CONFIG.FISH_TIMEOUT then failReason = "fish_timeout"; break end
+        if tick() - fishStart > CONFIG.FISH_TIMEOUT then break end
         task.wait(0.2)
     end
 
     if success then
-        SetStatus("تم الصيد بنجاح", THEME.Success)
-        local waitUntil = tick() + CONFIG.MINIGAME_WAIT_GRACE
-        while isRunning and autoFishLoopId == myLoopId and WaitOverlay.Visible and tick() < waitUntil do task.wait(0.2) end
+        SetStatus("تم الصيد!", THEME.Success)
+        totalCaught = totalCaught + 1
+        if StatCaught then StatCaught.Text = "الأسماك: " .. totalCaught end
         task.wait(CONFIG.POST_CATCH_DELAY)
         return "success"
     else
-        SetStatus(GetUserFailureMessage(nil, failReason), THEME.Danger)
-        if not (isRunning and autoFishLoopId == myLoopId) then return "cancelled" end
         return "failed"
     end
 end
@@ -996,13 +844,9 @@ local function AutoFishLoop()
     local myLoopId = autoFishLoopId
     task.spawn(function()
         while isRunning and autoFishLoopId == myLoopId do
-            local result = "failed"
-            local ok, err = pcall(function() result = RunOneAttempt(myLoopId) or "failed" end)
-            if not ok then result = "error"; SetStatus("حدث خطأ", THEME.Danger) end
+            local result = RunOneAttempt(myLoopId)
             if not (isRunning and autoFishLoopId == myLoopId) then break end
-            attemptStartTick = 0
-            if result == "cancelled" then break
-            elseif result ~= "success" then task.wait(1) end
+            if result ~= "success" then task.wait(1) end
         end
     end)
 end
@@ -1010,15 +854,31 @@ end
 ToggleBtn.MouseButton1Click:Connect(function()
     isRunning = not isRunning
     if isRunning then
-        ToggleBtn.Text = "⏹️  إيقاف"
-        ToggleBtn.BackgroundColor3 = THEME.Danger
-        ToggleGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, Color3.fromRGB(200, 40, 60)), ColorSequenceKeypoint.new(1, Color3.fromRGB(240, 80, 100))}
+        ToggleBtn.Text = "⏹ إيقاف"
+        TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.Danger}):Play()
         AutoFishLoop()
     else
-        ToggleBtn.Text = "▶️  تشغيل"
-        ToggleBtn.BackgroundColor3 = THEME.Success
-        ToggleGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 180, 90)), ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 230, 140))}
-        SetStatus("متوقف", THEME.TextDim)
-        CancelWait()
+        ToggleBtn.Text = "▶  بدء الصيد"
+        TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.Success}):Play()
+        SetStatus("جاهز", THEME.Success)
+        WaitOverlay.Visible = false
     end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local elapsed = math.floor(tick() - startTime)
+        local h = math.floor(elapsed / 3600)
+        local m = math.floor((elapsed % 3600) / 60)
+        local s = math.floor(elapsed % 60)
+        if StatTime then StatTime.Text = string.format("الوقت: %02d:%02d:%02d", h, m, s) end
+    end
+end)
+
+localPlayer.Idled:Connect(function()
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new(0, 0))
+    end)
 end)
