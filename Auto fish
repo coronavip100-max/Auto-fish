@@ -1,5 +1,6 @@
 -- ==========================================
--- Ultimate Auto-Fish v74 (Glass UI + Respawn Fix)
+-- Ultimate Auto-Fish v75 (Glass UI + Fixes)
+-- إصلاحات: WaitOverlay، الأوامر المفقودة، القيم الثابتة، أسماء الأدوات، البيع
 -- ==========================================
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -16,20 +17,25 @@ local CONFIG = {
     CAST_TIMEOUT          = 6,
     POST_CATCH_DELAY      = 3,
     TOOL_LOST_GRACE       = 2,
-    MINIGAME_WAIT_GRACE   = 6,
+    MINIGAME_WAIT_GRACE   = 4,      -- ⭐ صار مستخدم (كان ثابت 4)
     CAST_DEACTIVATE_WAIT  = 1.2,
     TOOL_RESET_WAIT       = 0.6,
-    AUTO_SELL_INTERVAL    = 600, -- 10 دقائق
+    EQUIP_WAIT            = 0.5,    -- ⭐ جديد
+    FAILED_RETRY_WAIT     = 1,      -- ⭐ جديد
+    GUID_COMPLETE_DELAY   = 0.3,    -- ⭐ جديد
+    SELL_STEP_DELAY       = 0.08,   -- ⭐ جديد
+    POST_SELL_STATUS_WAIT = 0.8,    -- ⭐ جديد
+    AUTO_SELL_INTERVAL    = 600,    -- 10 دقائق
 }
 
 local THEME = {
     BgMain     = Color3.fromRGB(15, 17, 26),
     BgGlass    = Color3.fromRGB(25, 28, 40),
     BgSoft     = Color3.fromRGB(35, 40, 55),
-    Accent     = Color3.fromRGB(100, 150, 255), 
-    AccentGlow = Color3.fromRGB(0, 200, 255),   
-    Success    = Color3.fromRGB(50, 220, 120),  
-    Danger     = Color3.fromRGB(255, 80, 100),  
+    Accent     = Color3.fromRGB(100, 150, 255),
+    AccentGlow = Color3.fromRGB(0, 200, 255),
+    Success    = Color3.fromRGB(50, 220, 120),
+    Danger     = Color3.fromRGB(255, 80, 100),
     TextMain   = Color3.fromRGB(255, 255, 255),
     TextDim    = Color3.fromRGB(160, 170, 190),
 }
@@ -50,11 +56,11 @@ local Remotes = {
 }
 
 local FISH_NAMES = {
-    "Orca", "Megalodon", "Shark", "Sailfish", "Hammerhead Shark", "Whale Shark", 
-    "Frilled shark", "Stalker", "Plesiosaurus", "Sea Angel", "Seahorse", "Koi Fish", 
-    "Can of Beans", "Blue Marlin", "Humpback Whale", "Salmon", "Anglerfish", 
-    "Dogfish Shark", "Beluga Whale", "Mugil", "Dead Fish", "Empty Can", "Rubber Duck", 
-    "Green fish", "Lobster", "Mahi-Mahi", "Clown Fish", "Star Fish", "Puffer Fish", 
+    "Orca", "Megalodon", "Shark", "Sailfish", "Hammerhead Shark", "Whale Shark",
+    "Frilled shark", "Stalker", "Plesiosaurus", "Sea Angel", "Seahorse", "Koi Fish",
+    "Can of Beans", "Blue Marlin", "Humpback Whale", "Salmon", "Anglerfish",
+    "Dogfish Shark", "Beluga Whale", "Mugil", "Dead Fish", "Empty Can", "Rubber Duck",
+    "Green fish", "Lobster", "Mahi-Mahi", "Clown Fish", "Star Fish", "Puffer Fish",
     "Blue fish", "Tuna", "Gold Fish", "Oncorhynchus mykiss", "Squid"
 }
 
@@ -77,6 +83,7 @@ local SELLING_LOCATIONS = {
 local isRunning = false
 local isMinimized = false
 local isAutoSell = false
+local isSelling = false                    -- ⭐ حماية زر البيع
 local totalCaught = 0
 local startTime = tick()
 local lastAutoSellTime = tick()
@@ -84,7 +91,11 @@ local lastAutoSellTime = tick()
 local LastStatus = "idle"
 local statusVersion = 0
 local autoFishLoopId = 0
-local waitGeneration = 0
+
+-- ⭐ نظام قائمة انتظار للـ guids (يحل مشكلة Complete المفقود)
+local pendingGuids = {}
+local processingGuids = false
+local cachedRodName = nil                  -- ⭐ كاش لاسم الصنارة
 
 local MAIN_WIDTH = 300
 local MAIN_HEIGHT = 340
@@ -107,9 +118,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999
 ScreenGui.Parent = PlayerGui
 
--- ==========================================
--- 🔥 زر الفتح العائم (احترافي وقابل للسحب)
--- ==========================================
+-- 🔥 زر الفتح العائم
 FloatBtn = Instance.new("TextButton")
 FloatBtn.Size = UDim2.new(0, 55, 0, 55)
 FloatBtn.Position = UDim2.new(0, 20, 0.4, 0)
@@ -120,13 +129,13 @@ FloatBtn.Font = Enum.Font.GothamBold
 FloatBtn.TextColor3 = THEME.AccentGlow
 FloatBtn.AutoButtonColor = false
 FloatBtn.Active = true
-FloatBtn.ZIndex = 100 -- فوق كل شي
+FloatBtn.ZIndex = 100
 FloatBtn.Parent = ScreenGui
 Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(1, 0)
 
 local FBtnGrad = Instance.new("UIGradient")
 FBtnGrad.Color = ColorSequence.new{
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 17, 26)), 
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 17, 26)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(35, 40, 55))
 }
 FBtnGrad.Rotation = 135
@@ -176,7 +185,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -120, 1, 0)
 Title.Position = UDim2.new(0, 20, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Auto-Fish"
+Title.Text = "Auto-Fish v75"
 Title.TextColor3 = THEME.TextMain
 Title.TextSize = 18
 Title.Font = Enum.Font.GothamBold
@@ -232,12 +241,10 @@ local function CreateTab(name, icon, title)
     btn.AutoButtonColor = false
     btn.Parent = TabBar
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
-    
     local cStroke = Instance.new("UIStroke", btn)
     cStroke.Color = THEME.BgSoft
     cStroke.Thickness = 1
     cStroke.Transparency = 1
-    
     Tabs[name] = {Btn = btn, Stroke = cStroke}
 end
 
@@ -266,7 +273,6 @@ local function SwitchTab(tabName)
             data.Stroke.Transparency = 1
         end
     end
-    
     for name, frame in pairs(ContentFrames) do
         if name == tabName then
             frame.Visible = true
@@ -446,14 +452,12 @@ local function createStatCard(icon, text, yPos)
     card.BackgroundTransparency = 0.3
     card.Parent = StatsTab
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
-    
     local iLbl = Instance.new("TextLabel")
     iLbl.Size = UDim2.new(0, 40, 1, 0)
     iLbl.BackgroundTransparency = 1
     iLbl.Text = icon
     iLbl.TextSize = 20
     iLbl.Parent = card
-    
     local tLbl = Instance.new("TextLabel")
     tLbl.Size = UDim2.new(1, -50, 1, 0)
     tLbl.Position = UDim2.new(0, 45, 0, 0)
@@ -497,17 +501,14 @@ end
 SwitchTab("Fishing")
 
 -- ==========================================
--- 🔥 دوال التحكم بالزر العائم (مُحسنة)
+-- دوال التحكم بالزر العائم
 -- ==========================================
 local function ToggleMainUI()
     Main.Visible = not Main.Visible
     if Main.Visible then
-        -- إرجاع الحجم الصحيح سواء كان مصغر أو لا
         local targetHeight = isMinimized and MAIN_MIN_HEIGHT or MAIN_HEIGHT
         Main.Size = UDim2.new(0, MAIN_WIDTH * 0.8, 0, targetHeight * 0.8)
         TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, MAIN_WIDTH, 0, targetHeight)}):Play()
-        
-        -- التأكد من ظهور التبويبات لو كان مصغر
         if not isMinimized then
             TabBar.Visible = true
             ContentArea.Visible = true
@@ -517,7 +518,6 @@ end
 
 HideBtn.MouseButton1Click:Connect(ToggleMainUI)
 
--- 🟢 كود السحب (Drag System) للزر العائم
 local draggingFAB = false
 local dragStartFAB = nil
 local startPosFAB = nil
@@ -541,7 +541,7 @@ UserInputService.InputChanged:Connect(function(input)
         end
         if hasDraggedFAB then
             FloatBtn.Position = UDim2.new(
-                startPosFAB.X.Scale, startPosFAB.X.Offset + delta.X, 
+                startPosFAB.X.Scale, startPosFAB.X.Offset + delta.X,
                 startPosFAB.Y.Scale, startPosFAB.Y.Offset + delta.Y
             )
         end
@@ -552,14 +552,11 @@ UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         if draggingFAB then
             draggingFAB = false
-            if not hasDraggedFAB then
-                ToggleMainUI()
-            end
+            if not hasDraggedFAB then ToggleMainUI() end
         end
     end
 end)
 
--- تصغير النافذة
 MinimizeBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
     if isMinimized then
@@ -575,7 +572,6 @@ MinimizeBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- سحب النافذة الرئيسية
 local dragging, dragInput, dragStart, startPos
 TitleRow.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -593,13 +589,12 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- 🟢 نظام الحماية عند العودة للعبة أو الموت
 localPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     if ScreenGui and ScreenGui.Parent then
         Main.Visible = true
         FloatBtn.Visible = true
-        SwitchTab(CurrentTab) -- إعادة تحميل التبويب الحالي
+        SwitchTab(CurrentTab)
         if isMinimized then
             Main.Size = UDim2.new(0, MAIN_WIDTH, 0, MAIN_MIN_HEIGHT)
             TabBar.Visible = false
@@ -613,28 +608,32 @@ localPlayer.CharacterAdded:Connect(function()
 end)
 
 -- ==========================================
--- دوال البيع والصيد
+-- ⭐ دوال البيع (بصلاحية silent)
 -- ==========================================
-local function PerformSell()
+local function PerformSell(silent)
     if not Remotes.InventoryAction then return end
-    SetStatus("جاري البيع...", THEME.AccentGlow)
+    if not silent then SetStatus("جاري البيع...", THEME.AccentGlow) end
     for loop = 1, 3 do
         for i, fishName in ipairs(FISH_NAMES) do
             pcall(function()
                 Remotes.InventoryAction:FireServer({amount = 99, action = "sell", fishId = "Glaciers/" .. fishName})
             end)
-            task.wait(0.08) 
+            task.wait(CONFIG.SELL_STEP_DELAY)
         end
     end
-    SetStatus("تم البيع!", THEME.Success)
+    if not silent then SetStatus("تم البيع!", THEME.Success) end
 end
 
 SellAllBtn.MouseButton1Click:Connect(function()
+    if isSelling then return end                   -- ⭐ منع التكرار
+    isSelling = true
     SellAllBtn.Text = "⏳ جاري البيع..."
     task.spawn(function()
-        PerformSell()
+        PerformSell(false)
+        task.wait(CONFIG.POST_SELL_STATUS_WAIT)    -- ⭐ نخلي المستخدم يشوف "تم البيع!"
         SellAllBtn.Text = "💰 بيع جميع السمك (يدوي)"
         if isRunning then SetStatus("عودة للصيد...", THEME.Success) else SetStatus("جاهز", THEME.Success) end
+        isSelling = false
     end)
 end)
 
@@ -656,7 +655,7 @@ task.spawn(function()
         if isAutoSell and isRunning then
             if (tick() - lastAutoSellTime) >= CONFIG.AUTO_SELL_INTERVAL then
                 lastAutoSellTime = tick()
-                PerformSell()
+                PerformSell(true)                  -- ⭐ صامت حتى لا يقطع حالة الصيد
             end
         else
             lastAutoSellTime = tick()
@@ -664,7 +663,9 @@ task.spawn(function()
     end
 end)
 
+-- ==========================================
 -- نافذة الانتظار
+-- ==========================================
 local WaitOverlay = Instance.new("Frame")
 WaitOverlay.Size = UDim2.new(0, 200, 0, 130)
 WaitOverlay.Position = UDim2.new(0.5, -100, 0.5, -65)
@@ -694,7 +695,7 @@ local WaitCount = Instance.new("TextLabel")
 WaitCount.Size = UDim2.new(1, 0, 0, 70)
 WaitCount.Position = UDim2.new(0, 0, 0, 40)
 WaitCount.BackgroundTransparency = 1
-WaitCount.Text = "4"
+WaitCount.Text = tostring(CONFIG.MINIGAME_WAIT_GRACE)
 WaitCount.TextColor3 = THEME.TextMain
 WaitCount.TextSize = 50
 WaitCount.Font = Enum.Font.GothamBlack
@@ -707,10 +708,29 @@ local function IsFailureStatus(s)
     return string.find(l, "fail") or string.find(l, "cancel") or string.find(l, "lost") or string.find(l, "error")
 end
 
+-- ⭐ توسيع مطابقة أسماء الأدوات
 local function IsToolValid(tool)
     if not tool then return false end
     local ln = string.lower(tool.Name)
-    return (string.find(ln, "rod") or string.find(ln, "fishing")) and true or false
+    return (string.find(ln, "rod") or string.find(ln, "fishing")
+            or string.find(ln, "pole") or string.find(ln, "cast")) ~= nil
+end
+
+-- ⭐ البحث عن الصنارة مع كاش
+local function FindRodInBackpack()
+    local bp = localPlayer:FindFirstChild("Backpack")
+    if not bp then return nil end
+    if cachedRodName then
+        local t = bp:FindFirstChild(cachedRodName)
+        if t and t:IsA("Tool") and IsToolValid(t) then return t end
+    end
+    for _, tool in ipairs(bp:GetChildren()) do
+        if tool:IsA("Tool") and IsToolValid(tool) then
+            cachedRodName = tool.Name
+            return tool
+        end
+    end
+    return nil
 end
 
 local function EquipRod()
@@ -720,14 +740,10 @@ local function EquipRod()
     if not hum then return false end
     local eq = char:FindFirstChildOfClass("Tool")
     if eq and IsToolValid(eq) then return true end
-    local bp = localPlayer:FindFirstChild("Backpack")
-    if bp then
-        for _, tool in ipairs(bp:GetChildren()) do
-            if tool:IsA("Tool") and IsToolValid(tool) then
-                local ok = pcall(function() hum:EquipTool(tool) end)
-                if ok then task.wait(0.5); return true end
-            end
-        end
+    local rod = FindRodInBackpack()
+    if rod then
+        local ok = pcall(function() hum:EquipTool(rod) end)
+        if ok then task.wait(CONFIG.EQUIP_WAIT); return true end
     end
     return false
 end
@@ -737,39 +753,56 @@ local function ForceToolReset()
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
     pcall(function() hum:UnequipTools() end)
-    task.wait(0.6)
+    task.wait(CONFIG.TOOL_RESET_WAIT)               -- ⭐ يستخدم CONFIG
     return EquipRod()
 end
 
+-- ⭐ نظام قائمة الانتظار للـ guids (يحل مشكلة Complete المفقود)
+local function ProcessGuids()
+    if processingGuids then return end
+    processingGuids = true
+    task.spawn(function()
+        while #pendingGuids > 0 do
+            local guid = table.remove(pendingGuids, 1)
+            if isRunning then
+                WaitOverlay.Visible = true
+                for i = CONFIG.MINIGAME_WAIT_GRACE, 1, -1 do
+                    if not isRunning then break end
+                    WaitCount.Text = tostring(i)
+                    task.wait(1)
+                end
+                WaitOverlay.Visible = false
+            end
+            -- دايماً نرسل Complete حتى لو توقفنا، عشان السيرفر ما يعلق
+            pcall(function() Remotes.MinigameAction:FireServer("Complete", guid) end)
+            task.wait(CONFIG.GUID_COMPLETE_DELAY)
+        end
+        processingGuids = false
+        WaitOverlay.Visible = false
+    end)
+end
+
+-- ⭐ الانتقال
 function TeleportToLocation(pos, locName)
     local char = localPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
+    -- إيقاف نظيف
     isRunning = false
+    autoFishLoopId = autoFishLoopId + 1              -- ⭐ إلغاء الحلقة الجارية
     ToggleBtn.Text = "▶  بدء الصيد"
     TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.Success}):Play()
+    WaitOverlay.Visible = false
     hrp.CFrame = CFrame.new(pos)
     SetStatus("✅ تم الانتقال: " .. locName, THEME.Success)
 end
 
+-- ⭐ استقبال Start: يضاف للطابور دايماً
 if Remotes.MinigameCommand then
     Remotes.MinigameCommand.OnClientEvent:Connect(function(cmd, guid)
-        if cmd == "Start" and guid and isRunning then
-            local g = tostring(guid)
-            waitGeneration = waitGeneration + 1
-            local myGen = waitGeneration
-            WaitOverlay.Visible = true
-            WaitCount.Text = "4"
-            task.spawn(function()
-                for i = 4, 1, -1 do
-                    if waitGeneration ~= myGen or not isRunning then return end
-                    WaitCount.Text = tostring(i)
-                    task.wait(1)
-                end
-                if waitGeneration ~= myGen or not isRunning then return end
-                pcall(function() Remotes.MinigameAction:FireServer("Complete", g) end)
-                WaitOverlay.Visible = false
-            end)
+        if cmd == "Start" and guid then
+            table.insert(pendingGuids, tostring(guid))
+            ProcessGuids()
         end
     end)
 end
@@ -782,10 +815,9 @@ if Remotes.Status then
 end
 
 local function RunOneAttempt(myLoopId)
-    waitGeneration = waitGeneration + 1
     WaitOverlay.Visible = false
     local castStartVersion = statusVersion
-    
+
     SetStatus("تجهيز...", THEME.TextDim)
     if not EquipRod() then return "equip_failed" end
     if not isRunning or autoFishLoopId ~= myLoopId then return "cancelled" end
@@ -846,7 +878,7 @@ local function AutoFishLoop()
         while isRunning and autoFishLoopId == myLoopId do
             local result = RunOneAttempt(myLoopId)
             if not (isRunning and autoFishLoopId == myLoopId) then break end
-            if result ~= "success" then task.wait(1) end
+            if result ~= "success" then task.wait(CONFIG.FAILED_RETRY_WAIT) end
         end
     end)
 end
